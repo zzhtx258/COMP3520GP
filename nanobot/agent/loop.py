@@ -44,6 +44,18 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
+_TOOL_LOG_ARG_LIMIT = 4000
+
+
+def _format_tool_log_args(arguments: Any, max_chars: int = _TOOL_LOG_ARG_LIMIT) -> str:
+    """Format tool-call arguments for runtime logs without hiding useful detail."""
+    try:
+        args_str = json.dumps(arguments, ensure_ascii=False)
+    except TypeError:
+        args_str = repr(arguments)
+    if len(args_str) <= max_chars:
+        return args_str
+    return truncate_text(args_str, max_chars)
 
 
 class _LoopHook(AgentHook):
@@ -99,8 +111,7 @@ class _LoopHook(AgentHook):
             tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
             await self._on_progress(tool_hint, tool_hint=True)
         for tc in context.tool_calls:
-            args_str = json.dumps(tc.arguments, ensure_ascii=False)
-            logger.info("Tool call: {}({})", tc.name, args_str[:200])
+            logger.info("Tool call: {}({})", tc.name, _format_tool_log_args(tc.arguments))
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
