@@ -24,6 +24,7 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 | Skill | Description |
 |-------|-------------|
 | `github` | Interact with GitHub using the `gh` CLI |
+| `official-web-ingest` | Collect official website pages into `data/` as raw HTML, cleaned Markdown, and index metadata |
 | `weather` | Get weather info using wttr.in and Open-Meteo |
 | `summarize` | Summarize URLs, files, and YouTube videos |
 | `tmux` | Remote-control tmux sessions |

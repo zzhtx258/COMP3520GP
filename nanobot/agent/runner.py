@@ -41,6 +41,22 @@ _COMPACTABLE_TOOLS = frozenset({
     "web_search", "web_fetch", "list_dir",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+
+
+def _summarize_tool_result(result: Any, max_chars: int = 500) -> str:
+    """Return a compact but informative tool-result summary for logs."""
+    if result is None:
+        return "(empty)"
+    if isinstance(result, str):
+        text = result.replace("\n", "\\n").strip()
+        return truncate_text(text, max_chars) if len(text) > max_chars else text or "(empty)"
+    try:
+        text = repr(result)
+    except Exception:
+        text = f"<unrepresentable {type(result).__name__}>"
+    return truncate_text(text, max_chars) if len(text) > max_chars else text
+
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -479,6 +495,12 @@ class AgentRunner:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
 
+        logger.info(
+            "Tool result: {} -> {}",
+            tool_call.name,
+            _summarize_tool_result(result),
+        )
+
         if isinstance(result, str) and result.startswith("Error"):
             event = {
                 "name": tool_call.name,
@@ -720,4 +742,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-

@@ -453,12 +453,24 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
         added.append(str(dest.relative_to(workspace)))
 
+    def _mkdir(dest: Path):
+        if dest.exists():
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        added.append(str(dest.relative_to(workspace)) + "/")
+
     for item in tpl.iterdir():
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "history.jsonl")
-    (workspace / "skills").mkdir(exist_ok=True)
+    _mkdir(workspace / "skills")
+    _mkdir(workspace / "data")
+    _mkdir(workspace / "data" / "raw")
+    _mkdir(workspace / "data" / "content")
+    _mkdir(workspace / "data" / "indexes")
+    _mkdir(workspace / "data" / "indexes" / "rag-anything")
+    _write(None, workspace / "data" / "registry.jsonl")
 
     if added and not silent:
         from rich.console import Console
