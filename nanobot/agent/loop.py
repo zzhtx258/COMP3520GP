@@ -289,6 +289,11 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+        try:
+            from nanobot.agent.tools.rag import _register_rag_addon
+            _register_rag_addon(self)
+        except ImportError:
+            pass
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

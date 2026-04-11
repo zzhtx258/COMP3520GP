@@ -4,6 +4,9 @@
 .docs
 .env
 .web
+data/
+*.zip
+plan.md
 
 # Python bytecode & caches
 *.pyc

@@ -4,6 +4,8 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+    - ./data/raw:/data/raw:ro
+    - ./data/index:/data/index:ro
   cap_drop:
     - ALL
   cap_add:
