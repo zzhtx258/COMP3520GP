@@ -1,7 +1,5 @@
 """RAG graph retrieval tool backed by RAGAnything/LightRAG."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 from pathlib import Path
@@ -27,8 +25,8 @@ class RAGAddonConfig(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     enable: bool = True
-    storage_dir: str = "/data/index"
-    output_dir: str = "/data/raw"
+    storage_dir: str = "data/indexes"
+    output_dir: str = "data/raw"
     embedding: EmbeddingConfig
 
 
@@ -43,6 +41,26 @@ def _load_addon_config() -> RAGAddonConfig | None:
     return RAGAddonConfig.model_validate(data)
 
 
+def _resolve_workspace_data_path(raw_path: str, workspace: Path) -> Path:
+    workspace_root = workspace.expanduser().resolve()
+    candidate = Path(raw_path).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (workspace_root / candidate).resolve()
+
+
+async def warmup_rag_addon(loop: Any) -> None:
+    """Pre-initialize the LightRAG instance in the background at loop startup."""
+    tool = loop.tools.get("rag_query")
+    if tool is None or not isinstance(tool, RAGQueryTool):
+        return
+    try:
+        await tool._get_rag()
+    except Exception as exc:
+        from lightrag.utils import logger as rag_logger
+        rag_logger.warning(f"RAG warmup failed: {exc}")
+
+
 def _register_rag_addon(loop: Any) -> None:
     from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
 
@@ -52,49 +70,65 @@ def _register_rag_addon(loop: Any) -> None:
 
     llm_func = _build_llm_func(loop)
     embedding_func = _build_embedding_func(config)
+    workspace = Path(loop.workspace).expanduser().resolve()
+    storage_dir = _resolve_workspace_data_path(config.storage_dir, workspace)
+    output_dir = _resolve_workspace_data_path(config.output_dir, workspace)
 
     loop.tools.register(
         RAGQueryTool(
-            storage_dir=config.storage_dir,
+            storage_dir=storage_dir,
             llm_model_func=llm_func,
             embedding_func=embedding_func,
         )
     )
     loop.tools.register(
         RAGMarkdownGrepTool(
-            output_dir=config.output_dir,
-            workspace=loop.workspace,
+            output_dir=output_dir,
+            workspace=workspace,
         )
     )
 
 
 def _build_llm_func(loop: Any) -> Any:
-    import functools
-
     from nanobot.providers.anthropic_provider import AnthropicProvider
 
     provider = loop.provider
     model = loop.model
     api_key = getattr(provider, "api_key", None) or ""
-    api_base = getattr(provider, "api_base", None) or None
+    # Prefer _effective_base (resolves spec.default_api_base) over the raw api_base attr.
+    api_base = getattr(provider, "_effective_base", None) or getattr(provider, "api_base", None) or None
 
     if isinstance(provider, AnthropicProvider):
         from lightrag.llm.anthropic import anthropic_complete_if_cache
 
-        return functools.partial(
-            anthropic_complete_if_cache,
-            model=model,
-            api_key=api_key,
-        )
+        async def anthropic_llm(prompt, system_prompt=None, history_messages=[], **kwargs):
+            kwargs.pop("model", None)
+            return await anthropic_complete_if_cache(
+                model, prompt,
+                system_prompt=system_prompt,
+                history_messages=history_messages,
+                api_key=api_key,
+                **kwargs,
+            )
+
+        return anthropic_llm
 
     from lightrag.llm.openai import openai_complete_if_cache
 
-    return functools.partial(
-        openai_complete_if_cache,
-        model=model,
-        api_key=api_key,
-        **({"base_url": api_base} if api_base else {}),
-    )
+    extra = {"base_url": api_base} if api_base else {}
+
+    async def openai_llm(prompt, system_prompt=None, history_messages=[], **kwargs):
+        kwargs.pop("model", None)
+        return await openai_complete_if_cache(
+            model, prompt,
+            system_prompt=system_prompt,
+            history_messages=history_messages,
+            api_key=api_key,
+            **extra,
+            **kwargs,
+        )
+
+    return openai_llm
 
 
 def _build_embedding_func(config: RAGAddonConfig) -> Any:
@@ -112,23 +146,30 @@ def _build_embedding_func(config: RAGAddonConfig) -> Any:
     api_key = emb.api_key or (p.api_key if p else None) or ""
     api_base = emb.api_base or (p.api_base if p else None) or None
 
+    if not api_base:
+        from nanobot.providers.registry import find_by_name
+
+        spec = find_by_name(provider_name)
+        if spec and getattr(spec, "default_api_base", None):
+            api_base = spec.default_api_base
+
     if provider_name == "ollama":
-        from lightrag.llm.ollama import ollama_embedding
+        from lightrag.llm.ollama import ollama_embed
 
         raw_func = functools.partial(
-            ollama_embedding,
+            ollama_embed,
             model=emb.model,
             host=api_base or "http://localhost:11434",
         )
     else:
-        from lightrag.llm.openai import openai_embedding
+        from lightrag.llm.openai import openai_embed
 
         extra: dict[str, Any] = {}
         if api_base:
             extra["base_url"] = api_base
-        extra["dimensions"] = emb.dim
+        # Use .func to bypass openai_embed's built-in EmbeddingFunc(1536) wrapper and let our EmbeddingFunc(emb.dim) handle validation.
         raw_func = functools.partial(
-            openai_embedding,
+            openai_embed.func,
             model=emb.model,
             api_key=api_key,
             **extra,
@@ -153,15 +194,7 @@ def _build_embedding_func(config: RAGAddonConfig) -> Any:
             "mode": {
                 "type": "string",
                 "enum": ["local", "global", "hybrid", "naive", "mix", "bypass"],
-                "description": (
-                    "Retrieval mode. "
-                    "local: focuses on context-dependent information. "
-                    "global: utilizes global knowledge. "
-                    "hybrid: combines local and global retrieval methods. "
-                    "naive: performs a basic search without advanced techniques. "
-                    "mix: integrates knowledge graph and vector retrieval (default). "
-                    "bypass: skips retrieval and queries the LLM directly."
-                ),
+                "description": "Retrieval mode. mix (default): knowledge graph + vector. local: context-dependent. global: broad knowledge. naive: basic vector search.",
             },
             "top_k": {
                 "type": "integer",
@@ -191,14 +224,20 @@ class RAGQueryTool(Tool):
     async def _get_rag(self) -> Any:
         async with self._lock:
             if self._rag is None:
-                from raganything import RAGAnything
+                from raganything import RAGAnything, RAGAnythingConfig
 
-                self._rag = RAGAnything(
-                    working_dir=self._storage_dir,
+                rag = RAGAnything(
+                    config=RAGAnythingConfig(working_dir=self._storage_dir),
                     llm_model_func=self._llm_model_func,
                     vision_model_func=None,
                     embedding_func=self._embedding_func,
                 )
+                init_result = await rag._ensure_lightrag_initialized()
+                if not init_result.get("success"):
+                    raise RuntimeError(
+                        f"Failed to initialize LightRAG: {init_result.get('error')}"
+                    )
+                self._rag = rag
             return self._rag
 
     @property
@@ -208,11 +247,10 @@ class RAGQueryTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Query the knowledge graph built from ingested degree plan PDFs. "
-            "Use this for questions about curriculum structure, course requirements, "
-            "credit rules, prerequisite chains, and programme regulations across all "
-            "available degree programmes. "
-            "Prefer mode='mix' unless you have a specific reason to use another mode."
+            "Query the local knowledge graph built from HKU degree programme documents. "
+            "Use for questions about curriculum, course requirements, credit rules, prerequisites, "
+            "programme regulations, graduate employment statistics, and salary data. "
+            "Always try this before searching online. Default mode='mix'."
         )
 
     @property

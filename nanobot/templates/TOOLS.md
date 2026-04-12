@@ -31,6 +31,22 @@ This file documents non-obvious constraints and usage patterns.
 - Prefer this over `exec` for code and history searches
 - Binary or oversized files may be skipped to keep results readable
 
+## message — Sending Files to Users
+
+- The **only** way to deliver a file (image, chart, document, audio) to the user is via the
+  `message` tool with the `media` parameter containing the absolute file path(s).
+- Do NOT embed files as markdown image links (e.g. `![alt](path)`). Markdown links are
+  rendered only in text and are never transmitted as actual attachments.
+- When `exec` saves a file to a relative path such as `plot.png`, it is written to the
+  workspace root. Pass its absolute path to `message`:
+
+  ```python
+  message(content="Here is your chart.", media=["/home/nanobot/.nanobot/workspace/plot.png"])
+  ```
+
+- Always call `message` with `media` immediately after generating the file — do not wait for
+  the user to ask again.
+
 ## cron — Scheduled Reminders
 
 - Please refer to cron skill for usage.

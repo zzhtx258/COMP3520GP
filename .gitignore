@@ -7,6 +7,7 @@
 data/
 *.zip
 plan.md
+RAG-Anything
 
 # Python bytecode & caches
 *.pyc

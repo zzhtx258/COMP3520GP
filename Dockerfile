@@ -17,6 +17,9 @@ WORKDIR /app
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+    # Install CPU-only torch to avoid useless CUDA dependencies in the image
+    # Assumes we are deploying to a CPU-only machine
+    uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu && \
     uv pip install --system --no-cache . && \
     rm -rf nanobot bridge
 

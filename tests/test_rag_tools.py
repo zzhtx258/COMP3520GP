@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +20,134 @@ def _make_mock_loop() -> MagicMock:
     provider_name = os.environ.get("RAG_LLM_PROVIDER", "openai").lower()
     loop.provider.__class__ = AnthropicProvider if provider_name == "anthropic" else object
     return loop
+
+
+async def test_rag_query_initializes_with_config_signature(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Regression test for RAGAnything constructor compatibility.
+
+    Ensures `RAGQueryTool._get_rag()` uses the official
+    `RAGAnything(config=RAGAnythingConfig(working_dir=...))` pattern rather
+    than passing `working_dir` directly.
+    """
+    from nanobot.agent.tools.rag import RAGQueryTool
+    import raganything
+
+    captured: dict[str, object] = {}
+
+    class FakeConfig:
+        def __init__(self, *, working_dir: str) -> None:
+            self.working_dir = working_dir
+
+    class FakeRAG:
+        def __init__(
+            self,
+            *,
+            config: FakeConfig,
+            llm_model_func,
+            vision_model_func,
+            embedding_func,
+        ) -> None:
+            captured["config"] = config
+            captured["llm_model_func"] = llm_model_func
+            captured["vision_model_func"] = vision_model_func
+            captured["embedding_func"] = embedding_func
+
+        async def _ensure_lightrag_initialized(self) -> dict:
+            return {"success": True}
+
+    monkeypatch.setattr(raganything, "RAGAnything", FakeRAG)
+    monkeypatch.setattr(raganything, "RAGAnythingConfig", FakeConfig)
+
+    tool = RAGQueryTool(
+        storage_dir=tmp_path,
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+    )
+
+    rag = await tool._get_rag()
+
+    assert isinstance(rag, FakeRAG)
+    assert isinstance(captured["config"], FakeConfig)
+    assert captured["config"].working_dir == str(tmp_path.resolve())
+    assert captured["vision_model_func"] is None
+
+
+def test_rag_workspace_path_resolution_uses_workspace_relative_paths(tmp_path: Path) -> None:
+    from nanobot.agent.tools.rag import _resolve_workspace_data_path
+
+    workspace = (tmp_path / "workspace").resolve()
+    workspace.mkdir()
+
+    assert _resolve_workspace_data_path("data/index", workspace) == (
+        workspace / "data" / "index"
+    ).resolve()
+
+
+async def test_rag_grep_forces_output_root_and_md_only(tmp_path: Path) -> None:
+    from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
+
+    output_dir = tmp_path / "raw"
+    output_dir.mkdir()
+    (output_dir / "inside.md").write_text("needle\n", encoding="utf-8")
+    (output_dir / "inside.mdx").write_text("needle\n", encoding="utf-8")
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "outside.md").write_text("needle\n", encoding="utf-8")
+
+    tool = RAGMarkdownGrepTool(output_dir=output_dir, workspace=tmp_path)
+    result = await tool.execute(
+        "needle",
+        path=str(outside_dir),
+        output_mode="files_with_matches",
+    )
+
+    assert "inside.md" in result
+    assert "inside.mdx" not in result
+    assert "outside.md" not in result
+
+
+async def test_rag_grep_function_context_uses_markdown_headings(tmp_path: Path) -> None:
+    from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
+
+    output_dir = tmp_path / "raw"
+    target_dir = output_dir / "2017_BEng(CompSc)_6a13fc8d"
+    target_dir.mkdir(parents=True)
+    (target_dir / "plan.md").write_text(
+        "# Programme\n## Core Courses\nCOMP3516 is required\n",
+        encoding="utf-8",
+    )
+
+    tool = RAGMarkdownGrepTool(output_dir=output_dir, workspace=tmp_path)
+    result = await tool.execute(
+        "COMP3516",
+        subpath="2017_BEng(CompSc)_6a13fc8d",
+        function_context=True,
+    )
+
+    assert "plan.md:3" in result
+    assert "section: Programme > Core Courses" in result
+
+
+async def test_rag_grep_subpath_suggests_similar_directory(tmp_path: Path) -> None:
+    from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
+
+    output_dir = tmp_path / "raw"
+    (output_dir / "2017_BEng(CompSc)_6a13fc8d").mkdir(parents=True)
+    (output_dir / "2018_BEng(CompSc)_f4648e1c").mkdir(parents=True)
+
+    tool = RAGMarkdownGrepTool(output_dir=output_dir, workspace=tmp_path)
+    result = await tool.execute(
+        "COMP3516",
+        subpath="CompSc",
+    )
+
+    assert result.startswith("Error: subpath not found: CompSc")
+    assert "Did you mean:" in result
+    assert "2017_BEng(CompSc)_6a13fc8d" in result
 
 
 @pytest.mark.skipif(
@@ -63,5 +192,5 @@ async def test_rag_grep_is_recursive():
 
     tool = RAGMarkdownGrepTool(output_dir=OUTPUT_DIR)
     result = await tool.execute(".", output_mode="files_with_matches")
-    md_files = [line for line in result.splitlines() if line.endswith((".md", ".mdx"))]
+    md_files = [line for line in result.splitlines() if line.endswith(".md")]
     assert len(md_files) > 1, "Expected files from multiple nested directories"

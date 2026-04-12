@@ -441,6 +441,11 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        try:
+            from nanobot.agent.tools.rag import warmup_rag_addon
+            asyncio.create_task(warmup_rag_addon(self))
+        except ImportError:
+            pass
         logger.info("Agent loop started")
 
         while self._running:
