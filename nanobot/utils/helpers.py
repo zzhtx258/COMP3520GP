@@ -477,8 +477,14 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     if added and not silent:
         from rich.console import Console
+
+        def _display_target(name: str) -> Path:
+            if name.endswith("/"):
+                return workspace / name[:-1]
+            return workspace / name
+
         for name in added:
-            Console().print(f"  [dim]Created {name}[/dim]")
+            Console().print(f"  [dim]Created {name} at {_display_target(name)}[/dim]")
 
     # Initialize git for memory version control
     try:

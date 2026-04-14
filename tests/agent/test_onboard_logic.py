@@ -347,6 +347,23 @@ class TestSyncWorkspaceTemplates:
         for path in added:
             assert not Path(path).is_absolute()
 
+    def test_prints_workspace_absolute_targets(self, tmp_path, monkeypatch):
+        """Printed creation messages should make the workspace target explicit."""
+        workspace = tmp_path / "workspace"
+        messages: list[str] = []
+
+        class _FakeConsole:
+            def print(self, message):
+                messages.append(str(message))
+
+        monkeypatch.setattr("rich.console.Console", _FakeConsole)
+
+        sync_workspace_templates(workspace, silent=False)
+
+        assert messages
+        assert any("Created AGENTS.md at" in message for message in messages)
+        assert any(str(workspace) in message for message in messages)
+
 
 class TestProviderChannelInfo:
     """Tests for provider and channel info retrieval."""
