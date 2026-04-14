@@ -55,11 +55,7 @@ def _format_tool_log_args(arguments: Any, max_chars: int = _TOOL_LOG_ARG_LIMIT) 
         args_str = repr(arguments)
     if len(args_str) <= max_chars:
         return args_str
-    return truncate_text(args_str, max_chars)
-<<<<<<< HEAD
-=======
-
->>>>>>> de75c9a8b0673c1b06a5afa786b0a3973e85f2fb
+    return truncate_text_fn(args_str, max_chars)
 
 class _LoopHook(AgentHook):
     """Core hook for the main loop."""

@@ -468,15 +468,12 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "history.jsonl")
     _mkdir(workspace / "skills")
-<<<<<<< HEAD
     _mkdir(workspace / "data")
     _mkdir(workspace / "data" / "raw")
     _mkdir(workspace / "data" / "content")
     _mkdir(workspace / "data" / "indexes")
     _mkdir(workspace / "data" / "indexes" / "rag-anything")
     _write(None, workspace / "data" / "registry.jsonl")
-=======
->>>>>>> de75c9a8b0673c1b06a5afa786b0a3973e85f2fb
 
     if added and not silent:
         from rich.console import Console
