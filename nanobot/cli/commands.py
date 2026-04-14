@@ -227,6 +227,17 @@ def _is_exit_command(command: str) -> bool:
     return command.lower() in EXIT_COMMANDS
 
 
+def _interactive_inbound_metadata() -> dict[str, Any]:
+    """Return metadata for CLI interactive turns.
+
+    prompt_toolkit owns terminal rendering during interactive chat. Rich
+    Live/status streaming writes cursor-control ANSI directly to stdout,
+    which can leak raw escape sequences on some terminals. Keep interactive
+    turns non-streaming for stable output.
+    """
+    return {}
+
+
 async def _read_interactive_input_async() -> str:
     """Read user input using prompt_toolkit (handles paste, history, display).
 
@@ -1065,7 +1076,7 @@ def agent(
                             sender_id="user",
                             chat_id=cli_chat_id,
                             content=user_input,
-                            metadata={"_wants_stream": True},
+                            metadata=_interactive_inbound_metadata(),
                         ))
 
                         await turn_done.wait()

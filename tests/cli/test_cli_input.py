@@ -171,3 +171,11 @@ def test_make_console_uses_force_terminal():
     """Console should be created with force_terminal=True for proper ANSI handling."""
     console = stream_mod._make_console()
     assert console._force_terminal is True
+
+
+def test_interactive_inbound_metadata_disables_streaming():
+    """Interactive CLI should avoid Rich streaming under prompt_toolkit."""
+    metadata = commands._interactive_inbound_metadata()
+
+    assert metadata == {}
+    assert "_wants_stream" not in metadata
