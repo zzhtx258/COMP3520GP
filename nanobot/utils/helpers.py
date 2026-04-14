@@ -15,9 +15,12 @@ from loguru import logger
 
 
 def strip_think(text: str) -> str:
-    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    """Remove thinking blocks and any unclosed trailing tag."""
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
-    text = re.sub(r"<think>[\s\S]*$", "", text)
+    text = re.sub(r"^\s*<think>[\s\S]*$", "", text)
+    # Gemma 4 and similar models use <thought>...</thought> blocks
+    text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
+    text = re.sub(r"^\s*<thought>[\s\S]*$", "", text)
     return text.strip()
 
 
@@ -465,12 +468,15 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "history.jsonl")
     _mkdir(workspace / "skills")
+<<<<<<< HEAD
     _mkdir(workspace / "data")
     _mkdir(workspace / "data" / "raw")
     _mkdir(workspace / "data" / "content")
     _mkdir(workspace / "data" / "indexes")
     _mkdir(workspace / "data" / "indexes" / "rag-anything")
     _write(None, workspace / "data" / "registry.jsonl")
+=======
+>>>>>>> de75c9a8b0673c1b06a5afa786b0a3973e85f2fb
 
     if added and not silent:
         from rich.console import Console
