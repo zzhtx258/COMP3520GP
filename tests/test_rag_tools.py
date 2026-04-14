@@ -86,6 +86,64 @@ def test_rag_workspace_path_resolution_uses_workspace_relative_paths(tmp_path: P
     ).resolve()
 
 
+def test_register_rag_addon_only_registers_rag_query(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.agent.tools.rag import (
+        EmbeddingConfig,
+        RAGAddonConfig,
+        RAGQueryTool,
+        _register_rag_addon,
+    )
+
+    registered: list[object] = []
+
+    class _DummyRegistry:
+        def register(self, tool: object) -> None:
+            registered.append(tool)
+
+    loop = MagicMock()
+    loop.workspace = tmp_path / "workspace"
+    loop.tools = _DummyRegistry()
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.rag._load_addon_config",
+        lambda: RAGAddonConfig(
+            enable=True,
+            storage_dir="data/indexes",
+            output_dir="data/raw",
+            embedding=EmbeddingConfig(provider="openai", model="text-embedding-3-large", dim=1024),
+        ),
+    )
+    monkeypatch.setattr("nanobot.agent.tools.rag._build_llm_func", lambda _loop: object())
+    monkeypatch.setattr("nanobot.agent.tools.rag._build_embedding_func", lambda _config: object())
+
+    _register_rag_addon(loop)
+
+    assert len(registered) == 1
+    assert isinstance(registered[0], RAGQueryTool)
+    assert registered[0].name == "rag_query"
+
+
+def test_prompt_templates_prefer_grep_in_data_content() -> None:
+    identity = Path("nanobot/templates/agent/identity.md").read_text(encoding="utf-8")
+    tools = Path("nanobot/templates/TOOLS.md").read_text(encoding="utf-8")
+    skill = Path("nanobot/skills/rag/SKILL.md").read_text(encoding="utf-8")
+
+    assert "data/content" in identity
+    assert "prefer `rag_query`" in identity
+    assert "writing and running code" in identity
+    assert "consider using a subagent" in identity
+    assert 'path="data/content"' in tools
+    assert "rag_grep" not in skill
+    assert "data/content" in skill
+    assert "accuracy-sensitive lookups" in skill
+    assert "context-heavy questions" in skill
+    assert "consider writing code" in skill
+    assert "consider using a subagent" in skill
+
+
 async def test_rag_grep_forces_output_root_and_md_only(tmp_path: Path) -> None:
     from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
 

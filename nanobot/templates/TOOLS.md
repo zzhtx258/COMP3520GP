@@ -21,6 +21,7 @@ This file documents non-obvious constraints and usage patterns.
 ## grep — Content Search
 
 - Use `grep` to search file contents inside the workspace
+- For ingested corpus/document searches, start with `path="data/content"`
 - Default behavior returns only matching file paths (`output_mode="files_with_matches"`)
 - Supports optional `glob` filtering plus `context_before` / `context_after`
 - Supports `type="py"`, `type="ts"`, `type="md"` and similar shorthand filters

@@ -62,8 +62,6 @@ async def warmup_rag_addon(loop: Any) -> None:
 
 
 def _register_rag_addon(loop: Any) -> None:
-    from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
-
     config = _load_addon_config()
     if config is None or not config.enable:
         return
@@ -72,19 +70,12 @@ def _register_rag_addon(loop: Any) -> None:
     embedding_func = _build_embedding_func(config)
     workspace = Path(loop.workspace).expanduser().resolve()
     storage_dir = _resolve_workspace_data_path(config.storage_dir, workspace)
-    output_dir = _resolve_workspace_data_path(config.output_dir, workspace)
 
     loop.tools.register(
         RAGQueryTool(
             storage_dir=storage_dir,
             llm_model_func=llm_func,
             embedding_func=embedding_func,
-        )
-    )
-    loop.tools.register(
-        RAGMarkdownGrepTool(
-            output_dir=output_dir,
-            workspace=workspace,
         )
     )
 
