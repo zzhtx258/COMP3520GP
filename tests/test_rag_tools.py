@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +21,79 @@ def _make_mock_loop() -> MagicMock:
     provider_name = os.environ.get("RAG_LLM_PROVIDER", "openai").lower()
     loop.provider.__class__ = AnthropicProvider if provider_name == "anthropic" else object
     return loop
+
+
+def test_build_embedding_func_uses_provider_default_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.agent.tools.rag import EmbeddingConfig, RAGAddonConfig, _build_embedding_func
+    from nanobot.config.schema import Config, ProviderConfig, ProvidersConfig
+
+    def _fake_openai_embed_func(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "lightrag.llm.openai.openai_embed",
+        SimpleNamespace(func=_fake_openai_embed_func),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config(
+            providers=ProvidersConfig(
+                dashscope=ProviderConfig(api_key="sk-test", api_base=None)
+            )
+        ),
+    )
+
+    embedding_func = _build_embedding_func(
+        RAGAddonConfig(
+            embedding=EmbeddingConfig(
+                provider="dashscope",
+                model="text-embedding-v3",
+                dim=1024,
+            )
+        )
+    )
+
+    assert embedding_func.func.keywords.get("api_key") == "sk-test"
+    assert (
+        embedding_func.func.keywords.get("base_url")
+        == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+
+
+def test_build_embedding_func_prefers_explicit_rag_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.agent.tools.rag import EmbeddingConfig, RAGAddonConfig, _build_embedding_func
+    from nanobot.config.schema import Config
+
+    def _fake_openai_embed_func(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "lightrag.llm.openai.openai_embed",
+        SimpleNamespace(func=_fake_openai_embed_func),
+        raising=False,
+    )
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: Config())
+
+    embedding_func = _build_embedding_func(
+        RAGAddonConfig(
+            embedding=EmbeddingConfig(
+                provider="dashscope",
+                model="text-embedding-v3",
+                dim=1024,
+                api_base="https://custom-embedding-endpoint.example/v1",
+            )
+        )
+    )
+
+    assert (
+        embedding_func.func.keywords.get("base_url")
+        == "https://custom-embedding-endpoint.example/v1"
+    )
 
 
 async def test_rag_query_initializes_with_config_signature(

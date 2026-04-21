@@ -17,9 +17,18 @@ logger = logging.getLogger(__name__)
 class EmbeddingConfig(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    provider: str = "openai"
+    provider: str = "dashscope"
     model: str
     dim: int = Field(default=1536, gt=0)
+    api_key: str | None = None
+    api_base: str | None = None
+
+
+class LLMConfig(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    provider: str | None = None
+    model: str | None = None
     api_key: str | None = None
     api_base: str | None = None
 
@@ -30,6 +39,7 @@ class RAGAddonConfig(BaseModel):
     enable: bool = True
     storage_dir: str = "data/indexes"
     output_dir: str = "data/raw"
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     embedding: EmbeddingConfig
 
 
@@ -84,7 +94,9 @@ def _register_rag_addon(loop: Any) -> None:
 
 
 def _build_llm_func(loop: Any) -> Any:
+    from nanobot.config.loader import load_config
     from nanobot.providers.anthropic_provider import AnthropicProvider
+    from nanobot.providers.registry import find_by_name
 
     provider = loop.provider
     model = loop.model
@@ -92,7 +104,20 @@ def _build_llm_func(loop: Any) -> Any:
     # Prefer _effective_base (resolves spec.default_api_base) over the raw api_base attr.
     api_base = getattr(provider, "_effective_base", None) or getattr(provider, "api_base", None) or None
 
-    if isinstance(provider, AnthropicProvider):
+    rag = _load_addon_config()
+    llm = rag.llm if rag else None
+    rag_provider = (llm.provider if llm else "") or ""
+    rag_provider = rag_provider.strip().lower()
+    if rag_provider:
+        provider_name = rag_provider.replace("-", "_")
+        model = (llm.model if llm else None) or model
+        nanobot_cfg = load_config()
+        p = getattr(nanobot_cfg.providers, provider_name, None)
+        api_key = (llm.api_key if llm else None) or (p.api_key if p else None) or ""
+        api_base = (llm.api_base if llm else None) or (p.api_base if p else None) or None
+    use_anthropic = rag_provider.replace("-", "_") == "anthropic" if rag_provider else isinstance(provider, AnthropicProvider)
+
+    if use_anthropic:
         from lightrag.llm.anthropic import anthropic_complete_if_cache
 
         async def anthropic_llm(prompt, system_prompt=None, history_messages=[], **kwargs):
@@ -106,6 +131,25 @@ def _build_llm_func(loop: Any) -> Any:
             )
 
         return anthropic_llm
+
+    active_provider_name = rag_provider.replace("-", "_") if rag_provider else ""
+    if not active_provider_name:
+        nanobot_cfg = load_config()
+        active_provider_name = (nanobot_cfg.get_provider_name(model) or "").replace("-", "_")
+    active_spec = find_by_name(active_provider_name) if active_provider_name else None
+    if active_spec and active_spec.is_oauth:
+
+        async def oauth_llm(prompt, system_prompt=None, history_messages=[], **kwargs):
+            kwargs.pop("model", None)
+            response = await provider.chat_with_retry(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                tools=None,
+                tool_choice=None,
+            )
+            return response.content or ""
+
+        return oauth_llm
 
     from lightrag.llm.openai import openai_complete_if_cache
 
@@ -131,21 +175,22 @@ def _build_embedding_func(config: RAGAddonConfig) -> Any:
     from lightrag.utils import EmbeddingFunc
 
     from nanobot.config.loader import load_config
+    from nanobot.providers.registry import find_by_name
 
     emb = config.embedding
     provider_name = emb.provider.lower()
+    normalized_provider_name = provider_name.replace("-", "_")
 
     nanobot_cfg = load_config()
-    p = getattr(nanobot_cfg.providers, provider_name.replace("-", "_"), None)
+    p = getattr(nanobot_cfg.providers, normalized_provider_name, None)
+    spec = find_by_name(normalized_provider_name)
     api_key = emb.api_key or (p.api_key if p else None) or ""
-    api_base = emb.api_base or (p.api_base if p else None) or None
-
-    if not api_base:
-        from nanobot.providers.registry import find_by_name
-
-        spec = find_by_name(provider_name)
-        if spec and getattr(spec, "default_api_base", None):
-            api_base = spec.default_api_base
+    api_base = (
+        emb.api_base
+        or (p.api_base if p else None)
+        or (spec.default_api_base if spec else None)
+        or None
+    )
 
     if provider_name == "ollama":
         from lightrag.llm.ollama import ollama_embed

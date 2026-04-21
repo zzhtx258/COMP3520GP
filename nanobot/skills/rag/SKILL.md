@@ -45,18 +45,19 @@ If cross-slice counting, comparison, or trend assembly is required, treat the qu
 
 ## Step 3 — Optional subagents for independent slices
 
-After scoping a hard question, decide whether subagents are needed. Launch subagents **only** when:
+After scoping a hard question, decide whether subagents are needed. For multi-file or multi-group tasks, consider using a subagent when the work can be split into independent slices. Launch subagents **only** when:
 - the question is hard, AND
-- the slices are truly independent (e.g. one per year, one per degree)
+- the slices are truly independent and have little dependency on each other
 
 Do not launch subagents for easy questions. Do not launch subagents when slices are not independent.
 
 Each subagent task must specify:
 - the original user question
-- one assigned slice only (e.g. year=2019, or degree=BEng(CompSc))
+- one assigned slice only (a single independent partition)
 - the candidate files / sections / aliases from the parent's scoping result
 - the subagent must produce explicit evidence for that slice only — NOT a global summary
-- the subagent must NOT spawn further subagents
+
+If an assigned slice is still too large but remains separable, the subagent may further split it into smaller independent sub-slices. Keep delegation bounded and preserve explicit evidence chains from child slices back to parent slice outputs.
 
 ## Step 4 — Assemble evidence before answering hard questions
 
