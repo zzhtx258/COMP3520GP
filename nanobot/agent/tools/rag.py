@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingConfig(BaseModel):
@@ -255,16 +258,33 @@ class RAGQueryTool(Tool):
         top_k: int = 60,
         **kwargs: Any,
     ) -> str:
+        logger.info("rag_query: query=%r mode=%s top_k=%d", query, mode, top_k)
         try:
             rag = await self._get_rag()
+        except Exception as exc:
+            return (
+                f"RAG initialisation failed — the index may not be built yet or the config is invalid: {exc}. "
+                "Do not retry this tool. Fall back to grep on data/content for exact keyword matches."
+            )
+        try:
             result = await rag.aquery(
                 query,
                 mode=mode,
                 top_k=top_k,
                 only_need_context=True,
             )
-            if result is None:
-                return "No results found."
-            return str(result)
         except Exception as exc:
-            return f"Error querying RAG: {exc}"
+            return (
+                f"RAG query failed (transient error — you may retry with a rephrased query): {exc}. "
+                "Alternatively, fall back to grep on data/content for exact keyword matches."
+            )
+        if result is None or (isinstance(result, str) and not result.strip()):
+            return (
+                "No results found in the knowledge graph for this query. "
+                "Suggested next steps: (1) try grep on data/content for exact keywords or course codes, "
+                "(2) rephrase the query using different terminology, "
+                "(3) break the question into smaller sub-queries."
+            )
+        result_str = str(result)
+        logger.debug("rag_query: returned %d chars", len(result_str))
+        return result_str
