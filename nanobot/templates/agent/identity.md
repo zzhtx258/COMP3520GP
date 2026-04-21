@@ -38,6 +38,7 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 ## Search & Discovery
 
 - Prefer built-in `grep` / `glob` over `exec` for workspace search.
+- For ingested corpus or document searches, use `grep` with `path="data/content"`.
 - For broad, fuzzy, or context-heavy document questions, prefer `rag_query`.
 - On broad searches, use `grep(output_mode="count")` to scope before requesting full content.
 - For calculations, comparisons, or data analysis, consider writing and running code instead of reasoning manually.
