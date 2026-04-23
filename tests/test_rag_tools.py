@@ -207,15 +207,44 @@ def test_prompt_templates_prefer_grep_in_data_content() -> None:
 
     assert "data/content" in identity
     assert "prefer `rag_query`" in identity
+    assert "corpus-facing retrieval terms" in identity
     assert "writing and running code" in identity
     assert "consider using a subagent" in identity
     assert 'path="data/content"' in tools
     assert "rag_grep" not in skill
     assert "data/content" in skill
-    assert "accuracy-sensitive lookups" in skill
-    assert "context-heavy questions" in skill
-    assert "consider writing code" in skill
+    assert "literal text search" in skill
+    assert "semantic + knowledge-graph retrieval" in skill
+    assert "How to write `rag_query` queries" in skill
+    assert "Treat the `rag_query` string as a retrieval query" in skill
+    assert "Bad:" in skill
+    assert "consider writing and running code" in skill
     assert "consider using a subagent" in skill
+
+
+def test_rag_query_tool_description_teaches_query_rewriting() -> None:
+    from nanobot.agent.tools.rag import RAGQueryTool
+
+    tool = RAGQueryTool(
+        storage_dir=".",
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+    )
+
+    query_schema = tool.parameters["properties"]["query"]
+    assert "short corpus-facing terms" in query_schema["description"]
+    assert "avoid workflow phrases" in query_schema["description"]
+    assert "short retrieval terms" in tool.description
+
+
+def test_summarize_rag_output_truncates_long_logs() -> None:
+    from nanobot.agent.tools.rag import _summarize_rag_output
+
+    text = "x" * 3000
+    summarized = _summarize_rag_output(text, max_chars=50)
+
+    assert summarized.startswith("x" * 50)
+    assert summarized.endswith("... (truncated)")
 
 
 async def test_rag_grep_forces_output_root_and_md_only(tmp_path: Path) -> None:

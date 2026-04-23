@@ -17,6 +17,28 @@ Use `path="data/content/<subdir>"` to narrow grep to a specific folder. For mark
 
 To calibrate `top_k` for rag_query, check corpus size first with `grep(output_mode="count", pattern=".", path="data/content", glob="*.md")` and scale accordingly.
 
+## How to write `rag_query` queries
+
+Treat the `rag_query` string as a retrieval query, not a task instruction.
+
+- Prefer corpus-facing terms: exact field labels, headings, employer names, programme names, degree names, section titles, aliases, and years.
+- Prefer English corpus vocabulary when the source documents are mostly English.
+- Keep the query short and keyword-rich; noun phrases beat full instructions.
+- Include likely table/header variants together when useful, e.g. `mean salary average monthly salary gross income basic salary`.
+- For cross-year or cross-programme work, let `rag_query` scope the files/aliases first; do not ask it to "rank", "compare", or "calculate" in the query string.
+- Remove workflow phrasing such as `先找出`, `再判断`, `不要直接`, `总结`, `first`, `then`, `summarize`, `rank`, `compute`.
+
+Good:
+
+- `graduate employment mean salary average monthly salary gross income programme year`
+- `BEng(CompSc) investment bank employer Goldman Sachs Morgan Stanley JP Morgan 2022 2023`
+- `basic salary and gross income table average monthly salary graduate employment`
+
+Bad:
+
+- `先找出所有提到平均薪资的项目和年份，再判断哪些文件最值得继续精读`
+- `Tell me which programme ranks highest by average salary across all years`
+
 ## Step 1 — Classify the query (easy vs. hard)
 
 Before retrieving anything, decide whether the question is **easy** or **hard**.

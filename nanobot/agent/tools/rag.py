@@ -2,17 +2,18 @@
 
 import asyncio
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.providers.base import LLMResponse
+from nanobot.utils.helpers import truncate_text
 
-logger = logging.getLogger(__name__)
+_RAG_LOG_OUTPUT_MAX_CHARS = 2000
 
 _RAG_CONTEXT_ANALYST_SYSTEM_PROMPT = """You are preparing retrieved knowledge-graph context for another agent.
 
@@ -104,6 +105,13 @@ def _build_context_analysis_messages(query: str, raw_context: str) -> list[dict[
             ),
         },
     ]
+
+
+def _summarize_rag_output(text: str, max_chars: int = _RAG_LOG_OUTPUT_MAX_CHARS) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return "(empty)"
+    return truncate_text(normalized, max_chars) if len(normalized) > max_chars else normalized
 
 
 async def warmup_rag_addon(loop: Any) -> None:
@@ -274,7 +282,13 @@ def _build_embedding_func(config: RAGAddonConfig) -> Any:
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Natural language question to answer from the knowledge graph.",
+                "description": (
+                    "Retrieval query for the knowledge graph. Write this as short corpus-facing "
+                    "terms, not a full task instruction: prefer exact field labels, headings, "
+                    "entity aliases, programme names, years, and English source vocabulary; avoid "
+                    "workflow phrases like 'first', 'then', 'summarize', and avoid asking for "
+                    "ranking or final calculations in the query string."
+                ),
                 "minLength": 1,
             },
             "mode": {
@@ -344,7 +358,10 @@ class RAGQueryTool(Tool):
             "Query the local knowledge graph built from HKU degree programme documents. "
             "Use for questions about curriculum, course requirements, credit rules, prerequisites, "
             "programme regulations, graduate employment statistics, and salary data. "
-            "Always try this before searching online. Default mode='mix'."
+            "Always try this before searching online. Default mode='mix'. "
+            "When writing the query, use short retrieval terms drawn from the corpus "
+            "(field labels, headings, entity aliases, programme names, years, English table/header text), "
+            "not a long natural-language workflow or ranking instruction."
         )
 
     @property
@@ -409,4 +426,6 @@ class RAGQueryTool(Tool):
             )
         result_str = str(result)
         logger.debug("rag_query: returned %d chars", len(result_str))
-        return await self._analyze_context(query, result_str)
+        analyzed = await self._analyze_context(query, result_str)
+        logger.info("rag_query output -> {}", _summarize_rag_output(analyzed))
+        return analyzed
