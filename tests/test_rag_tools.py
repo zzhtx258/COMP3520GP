@@ -107,7 +107,7 @@ async def test_rag_query_initializes_with_config_signature(
     than passing `working_dir` directly.
     """
     from nanobot.agent.tools.rag import RAGQueryTool
-    import raganything
+    raganything = pytest.importorskip("raganything")
 
     captured: dict[str, object] = {}
 
@@ -306,6 +306,107 @@ async def test_rag_query_returns_string():
     result = await tool.execute("What are the core required courses?", mode="hybrid")
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+async def test_rag_query_analyzes_large_context_for_agent() -> None:
+    from nanobot.agent.tools.rag import RAGQueryTool
+    from nanobot.providers.base import LLMResponse
+
+    large_context = "entity\n" * 2000
+
+    class FakeRAG:
+        async def aquery(self, *_args, **_kwargs):
+            return large_context
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def chat_with_retry(self, **kwargs):
+            self.calls.append(kwargs)
+            return LLMResponse(
+                content="RAG Analyst Summary\n\nRelevant Findings:\n- salary field appears in 2022 table",
+                finish_reason="stop",
+            )
+
+    provider = FakeProvider()
+    tool = RAGQueryTool(
+        storage_dir=".",
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+        provider=provider,
+        model="test-model",
+    )
+    tool._rag = FakeRAG()
+
+    result = await tool.execute("Which programme has the highest average salary?", mode="mix")
+
+    assert result.startswith("RAG Analyst Summary")
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["model"] == "test-model"
+    assert provider.calls[0]["reasoning_effort"] == "minimal"
+    assert "Which programme has the highest average salary?" in provider.calls[0]["messages"][1]["content"]
+
+
+async def test_rag_query_falls_back_to_raw_context_when_analysis_fails() -> None:
+    from nanobot.agent.tools.rag import RAGQueryTool
+    from nanobot.providers.base import LLMResponse
+
+    large_context = "relation\n" * 2000
+
+    class FakeRAG:
+        async def aquery(self, *_args, **_kwargs):
+            return large_context
+
+    class FakeProvider:
+        async def chat_with_retry(self, **_kwargs):
+            return LLMResponse(content="Error calling LLM", finish_reason="error")
+
+    tool = RAGQueryTool(
+        storage_dir=".",
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+        provider=FakeProvider(),
+        model="test-model",
+    )
+    tool._rag = FakeRAG()
+
+    result = await tool.execute("What matters?", mode="mix")
+
+    assert result == large_context
+
+
+async def test_rag_query_skips_analysis_for_short_context() -> None:
+    from nanobot.agent.tools.rag import RAGQueryTool
+
+    short_context = "short context"
+
+    class FakeRAG:
+        async def aquery(self, *_args, **_kwargs):
+            return short_context
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def chat_with_retry(self, **_kwargs):
+            self.called = True
+            raise AssertionError("should not be called")
+
+    provider = FakeProvider()
+    tool = RAGQueryTool(
+        storage_dir=".",
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+        provider=provider,
+        model="test-model",
+    )
+    tool._rag = FakeRAG()
+
+    result = await tool.execute("What matters?", mode="mix")
+
+    assert result == short_context
+    assert provider.called is False
 
 
 @pytest.mark.skipif(not OUTPUT_DIR, reason="RAG_OUTPUT_DIR not set")

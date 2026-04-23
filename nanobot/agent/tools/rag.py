@@ -10,8 +10,37 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.providers.base import LLMResponse
 
 logger = logging.getLogger(__name__)
+
+_RAG_CONTEXT_ANALYST_SYSTEM_PROMPT = """You are preparing retrieved knowledge-graph context for another agent.
+
+Transform raw RAG context into a compact, agent-friendly briefing that is easier to act on than the original dump.
+
+Rules:
+- Do not invent facts or answer beyond the supplied context.
+- Preserve exact numbers, years, programme names, employer names, job titles, salary labels, and file/path hints when present.
+- Remove obvious duplication, repetitive graph boilerplate, and low-signal metadata.
+- Keep details that may matter for follow-up grep/code analysis, even if they seem only possibly relevant.
+- Be explicit about uncertainty or missing data.
+- Prefer concise bullets over prose.
+
+Output format:
+RAG Analyst Summary
+
+Relevant Findings:
+- ...
+
+Structured Facts:
+- ...
+
+Source Hints:
+- ...
+
+Gaps / Follow-ups:
+- ...
+"""
 
 
 class EmbeddingConfig(BaseModel):
@@ -62,6 +91,21 @@ def _resolve_workspace_data_path(raw_path: str, workspace: Path) -> Path:
     return (workspace_root / candidate).resolve()
 
 
+def _build_context_analysis_messages(query: str, raw_context: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": _RAG_CONTEXT_ANALYST_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"User query:\n{query}\n\n"
+                "Raw RAG context:\n"
+                f"{raw_context}\n\n"
+                "Rewrite the raw RAG context into an agent-friendly briefing."
+            ),
+        },
+    ]
+
+
 async def warmup_rag_addon(loop: Any) -> None:
     """Pre-initialize the LightRAG instance in the background at loop startup."""
     tool = loop.tools.get("rag_query")
@@ -89,6 +133,9 @@ def _register_rag_addon(loop: Any) -> None:
             storage_dir=storage_dir,
             llm_model_func=llm_func,
             embedding_func=embedding_func,
+            provider=loop.provider,
+            model=loop.model,
+            provider_retry_mode=getattr(loop, "provider_retry_mode", "standard"),
         )
     )
 
@@ -253,10 +300,18 @@ class RAGQueryTool(Tool):
         storage_dir: str | Path,
         llm_model_func: Any,
         embedding_func: Any,
+        provider: Any | None = None,
+        model: str | None = None,
+        provider_retry_mode: str = "standard",
+        analysis_threshold_chars: int = 2500,
     ) -> None:
         self._storage_dir = str(Path(storage_dir).resolve())
         self._llm_model_func = llm_model_func
         self._embedding_func = embedding_func
+        self._provider = provider
+        self._model = model
+        self._provider_retry_mode = provider_retry_mode
+        self._analysis_threshold_chars = max(1, analysis_threshold_chars)
         self._rag: Any = None
         self._lock = asyncio.Lock()
 
@@ -296,6 +351,28 @@ class RAGQueryTool(Tool):
     def read_only(self) -> bool:
         return True
 
+    async def _analyze_context(self, query: str, raw_context: str) -> str:
+        if not raw_context or len(raw_context) < self._analysis_threshold_chars:
+            return raw_context
+        if self._provider is None or not self._model:
+            return raw_context
+
+        response: LLMResponse = await self._provider.chat_with_retry(
+            messages=_build_context_analysis_messages(query, raw_context),
+            tools=None,
+            model=self._model,
+            max_tokens=2200,
+            temperature=0,
+            reasoning_effort="minimal",
+            retry_mode=self._provider_retry_mode,
+        )
+        analyzed = (response.content or "").strip()
+        if response.finish_reason == "error" or not analyzed:
+            return raw_context
+        if len(analyzed) >= len(raw_context):
+            return raw_context
+        return analyzed
+
     async def execute(
         self,
         query: str,
@@ -332,4 +409,4 @@ class RAGQueryTool(Tool):
             )
         result_str = str(result)
         logger.debug("rag_query: returned %d chars", len(result_str))
-        return result_str
+        return await self._analyze_context(query, result_str)
