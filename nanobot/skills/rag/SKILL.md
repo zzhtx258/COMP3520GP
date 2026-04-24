@@ -14,6 +14,7 @@ always: true
 - **grep** with `path="data/content"` — literal text search. Use this to confirm exact values: course codes, credit counts, salary figures, verbatim policy text. Set `output_mode='content'` to see matching lines; `fixed_strings=true` for verbatim quotes.
 
 Use `path="data/content/<subdir>"` to narrow grep to a specific folder. For markdown-only searches, add `type="md"`.
+When browsing files, start from `data/content` and identify the relevant programme/year directories first. Only narrow into subfolders such as `hybrid_auto` after scoping the target directory; do not jump directly to `data/content/*/*/hybrid_auto/*.md` as the first discovery step.
 
 To calibrate `top_k` for rag_query, check corpus size first with `grep(output_mode="count", pattern=".", path="data/content", glob="*.md")` and scale accordingly.
 

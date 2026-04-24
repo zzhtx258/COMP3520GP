@@ -22,6 +22,7 @@ This file documents non-obvious constraints and usage patterns.
 
 - Use `grep` to search file contents inside the workspace
 - For ingested corpus/document searches, start with `path="data/content"`
+- For corpus discovery, prefer finding the relevant directories under `data/content` first; only narrow into `hybrid_auto` or other subfolders after you know which programme/year folder you need
 - Default behavior returns only matching file paths (`output_mode="files_with_matches"`)
 - Supports optional `glob` filtering plus `context_before` / `context_after`
 - Supports `type="py"`, `type="ts"`, `type="md"` and similar shorthand filters

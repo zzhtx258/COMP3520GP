@@ -1762,6 +1762,11 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/research <topic>` | Run a bounded background research loop for a topic |
+| `/research-status` | Show research task status in the current session |
+| `/research-status <topic>` | Show status for one research topic |
+| `/research-log <topic>` | Show the latest saved research run for a topic |
+| `/research-stop` | Stop the current research task |
 | `/help` | Show available in-chat commands |
 
 <details>
@@ -1781,6 +1786,44 @@ The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspac
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
 
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
+
+</details>
+
+<details>
+<summary><b>Research Loop</b></summary>
+
+Use `/research <topic>` when you want nanobot to explore a theme and accumulate interesting findings instead of answering immediately.
+
+Research runs in the background, so you can keep chatting with the main agent while it works. Results are persisted under:
+
+- `research/<topic-slug>/FINDINGS.md`
+- `research/<topic-slug>/runs/<timestamp>.md`
+
+Configuration lives in `~/.nanobot/config.json` under `agents.defaults.research`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "research": {
+        "maxRounds": 4,
+        "maxFindings": 6,
+        "maxStaleRounds": 2,
+        "modelOverride": null,
+        "allowWebValidation": true
+      }
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `maxRounds` | Maximum number of research rounds before stopping |
+| `maxFindings` | Maximum number of recorded findings in one run |
+| `maxStaleRounds` | Stop after this many consecutive rounds with no new findings |
+| `modelOverride` | Optional research-specific model override |
+| `allowWebValidation` | Allow limited web validation after local evidence already exists |
 
 </details>
 

@@ -208,11 +208,14 @@ def test_prompt_templates_prefer_grep_in_data_content() -> None:
     assert "data/content" in identity
     assert "prefer `rag_query`" in identity
     assert "corpus-facing retrieval terms" in identity
+    assert "start discovery from `data/content` itself" in identity
     assert "writing and running code" in identity
     assert "consider using a subagent" in identity
     assert 'path="data/content"' in tools
+    assert "relevant directories under `data/content` first" in tools
     assert "rag_grep" not in skill
     assert "data/content" in skill
+    assert "identify the relevant programme/year directories first" in skill
     assert "literal text search" in skill
     assert "semantic + knowledge-graph retrieval" in skill
     assert "How to write `rag_query` queries" in skill

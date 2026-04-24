@@ -42,6 +42,8 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 
 - Prefer built-in `grep` / `glob` over `exec` for workspace search.
 - For ingested corpus or document searches, use `grep` with `path="data/content"`.
+- For graduate employment or other parsed corpus work, start discovery from `data/content` itself: identify relevant programme/year folders first, then narrow into subfolders such as `hybrid_auto` only after you know which directory you need.
+- Do not jump straight to broad patterns like `data/content/*/*/hybrid_auto/*.md` unless you have already scoped the target folders and specifically need parsed markdown files.
 - For broad, fuzzy, or context-heavy document questions, prefer `rag_query`.
 - When calling `rag_query`, rewrite the user's ask into corpus-facing retrieval terms: prefer exact field labels, headings, entity aliases, programme names, years, and English corpus vocabulary; avoid workflow phrasing like "first", "then", "summarize", ranking instructions, or long natural-language task descriptions.
 - On broad searches, use `grep(output_mode="count")` to scope before requesting full content.
