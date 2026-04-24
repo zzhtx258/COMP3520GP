@@ -138,6 +138,7 @@ if DISCORD_AVAILABLE:
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
+                ("research-stop", "Stop the current research task", "/research-stop"),
             )
 
             for name, description, command_text in commands:
@@ -156,6 +157,16 @@ if DISCORD_AVAILABLE:
                     await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
                     return
                 await self._reply_ephemeral(interaction, build_help_text())
+
+            @self.tree.command(name="research", description="Run a bounded research loop for a topic")
+            @app_commands.describe(topic="Research topic or direction")
+            async def research_command(interaction: discord.Interaction, topic: str) -> None:
+                await self._forward_slash_command(interaction, f"/research {topic}")
+
+            @self.tree.command(name="research-log", description="Show the latest research log for a topic")
+            @app_commands.describe(topic="Research topic or direction")
+            async def research_log_command(interaction: discord.Interaction, topic: str) -> None:
+                await self._forward_slash_command(interaction, f"/research-log {topic}")
 
             @self.tree.error
             async def on_app_command_error(

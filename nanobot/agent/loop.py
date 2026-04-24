@@ -17,6 +17,7 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
+from nanobot.agent.research import ResearchEngine
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -39,7 +40,7 @@ from nanobot.utils.helpers import image_placeholder_text, truncate_text as trunc
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ResearchConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -162,6 +163,7 @@ class AgentLoop:
         session_ttl_minutes: int = 0,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
+        research_config: ResearchConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -215,6 +217,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._research_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> research tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.
@@ -245,6 +248,14 @@ class AgentLoop:
             store=self.context.memory,
             provider=provider,
             model=self.model,
+        )
+        self.research = ResearchEngine(
+            workspace=workspace,
+            provider=provider,
+            model=self.model,
+            tool_source=self.tools,
+            config=research_config or defaults.research,
+            provider_retry_mode=provider_retry_mode,
         )
         self._register_default_tools()
         self.commands = CommandRouter()

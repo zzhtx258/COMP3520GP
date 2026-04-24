@@ -135,6 +135,114 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+def _add_tracked_task(mapping: dict[str, list[asyncio.Task]], key: str, task: asyncio.Task) -> None:
+    mapping.setdefault(key, []).append(task)
+
+
+def _remove_tracked_task(mapping: dict[str, list[asyncio.Task]], key: str, task: asyncio.Task) -> None:
+    tasks = mapping.get(key)
+    if not tasks:
+        return
+    if task in tasks:
+        tasks.remove(task)
+    if not tasks:
+        mapping.pop(key, None)
+
+
+async def cmd_research(ctx: CommandContext) -> OutboundMessage:
+    """Start a bounded research loop for a topic."""
+    loop = ctx.loop
+    msg = ctx.msg
+    topic = ctx.args.strip()
+    if not topic:
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Usage: `/research <topic>`",
+            metadata={"render_as": "text"},
+        )
+
+    session_key = ctx.key or msg.session_key
+
+    async def _run_research() -> None:
+        try:
+            result = await loop.research.run(topic)
+            content = result.summary
+        except asyncio.CancelledError:
+            content = f"Research stopped for `{topic}`."
+            raise
+        except Exception as e:
+            content = f"Research failed for `{topic}`: {e}"
+        finally:
+            # Cleanup is handled by done callbacks; this just ensures outbound is attempted.
+            pass
+        await loop.bus.publish_outbound(
+            OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+        )
+
+    task = asyncio.create_task(_run_research())
+    _add_tracked_task(loop._active_tasks, session_key, task)
+    _add_tracked_task(loop._research_tasks, session_key, task)
+    task.add_done_callback(lambda t, k=session_key: _remove_tracked_task(loop._active_tasks, k, t))
+    task.add_done_callback(lambda t, k=session_key: _remove_tracked_task(loop._research_tasks, k, t))
+
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content=(
+            f"Research started for `{topic}`.\n\n"
+            "Use `/research-stop` to cancel it, or `/research-log "
+            f"{topic}` to inspect the latest run after it finishes."
+        ),
+    )
+
+
+async def cmd_research_log(ctx: CommandContext) -> OutboundMessage:
+    """Show the latest persisted research log for a topic."""
+    topic = ctx.args.strip()
+    if not topic:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Usage: `/research-log <topic>`",
+            metadata={"render_as": "text"},
+        )
+    latest = ctx.loop.research.latest_run_log(topic)
+    if not latest:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"No research runs found yet for `{topic}`. Run `/research {topic}` first.",
+            metadata={"render_as": "text"},
+        )
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=latest,
+        metadata={"render_as": "text"},
+    )
+
+
+async def cmd_research_stop(ctx: CommandContext) -> OutboundMessage:
+    """Cancel active research tasks for the session."""
+    loop = ctx.loop
+    msg = ctx.msg
+    tasks = loop._research_tasks.pop(ctx.key or msg.session_key, [])
+    cancelled = sum(1 for task in tasks if not task.done() and task.cancel())
+    for task in tasks:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    content = f"Stopped {cancelled} research task(s)." if cancelled else "No active research task."
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content=content,
+        metadata=dict(msg.metadata or {}),
+    )
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -324,6 +432,9 @@ def build_help_text() -> str:
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
+        "/research <topic> — Run a bounded research loop for a topic",
+        "/research-log <topic> — Show the latest research log for a topic",
+        "/research-stop — Stop the current research task",
         "/help — Show available commands",
     ]
     return "\n".join(lines)
@@ -341,4 +452,9 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.priority("/research-stop", cmd_research_stop)
+    router.exact("/research", cmd_research)
+    router.prefix("/research ", cmd_research)
+    router.exact("/research-log", cmd_research_log)
+    router.prefix("/research-log ", cmd_research_log)
     router.exact("/help", cmd_help)

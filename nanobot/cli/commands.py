@@ -603,6 +603,7 @@ def serve(
         timezone=runtime_config.agents.defaults.timezone,
         unified_session=runtime_config.agents.defaults.unified_session,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        research_config=runtime_config.agents.defaults.research,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -696,6 +697,7 @@ def gateway(
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        research_config=config.agents.defaults.research,
     )
 
     # Set cron callback (needs agent)
@@ -929,6 +931,7 @@ def agent(
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        research_config=config.agents.defaults.research,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

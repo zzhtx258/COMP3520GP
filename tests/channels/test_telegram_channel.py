@@ -193,6 +193,9 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert any(cmd.command == "dream" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
+    assert any(cmd.command == "research" for cmd in app.bot.commands)
+    assert any(cmd.command == "research_log" for cmd in app.bot.commands)
+    assert any(cmd.command == "research_stop" for cmd in app.bot.commands)
 
 
 @pytest.mark.asyncio
@@ -1097,6 +1100,27 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_command_normalizes_telegram_safe_research_aliases() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    update = _make_telegram_update(text="/research_log@nanobot_test salary trends", reply_to_message=None)
+
+    await channel._forward_command(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/research-log salary trends"
+
+
+@pytest.mark.asyncio
 async def test_on_help_includes_restart_command() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -1114,6 +1138,9 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/dream" in help_text
     assert "/dream-log" in help_text
     assert "/dream-restore" in help_text
+    assert "/research" in help_text
+    assert "/research-log" in help_text
+    assert "/research-stop" in help_text
 
 
 @pytest.mark.asyncio

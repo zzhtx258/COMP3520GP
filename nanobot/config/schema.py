@@ -59,6 +59,22 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class ResearchConfig(Base):
+    """Manual bounded research-loop configuration."""
+
+    max_rounds: int = Field(default=4, ge=1)
+    max_findings: int = Field(default=6, ge=1)
+    max_stale_rounds: int = Field(default=2, ge=1)
+    model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
+    )
+    allow_web_validation: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("allowWebValidation", "allow_web_validation"),
+    )
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -84,6 +100,7 @@ class AgentDefaults(Base):
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
 
 class AgentsConfig(Base):

@@ -555,7 +555,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status"])
+@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "research-stop"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -579,6 +579,48 @@ async def test_slash_commands_forward_via_handle_message(slash_name: str) -> Non
     assert len(handled) == 1
     assert handled[0]["content"] == f"/{slash_name}"
     assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
+async def test_slash_research_with_topic_forwards_full_command() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "research"
+
+    cmd = client.tree.get_command("research")
+    assert cmd is not None
+    await cmd.callback(interaction, "salary trends")
+
+    assert interaction.response.messages == [{"content": "Processing /research salary trends...", "ephemeral": True}]
+    assert handled[0]["content"] == "/research salary trends"
+
+
+@pytest.mark.asyncio
+async def test_slash_research_log_with_topic_forwards_full_command() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "research-log"
+
+    cmd = client.tree.get_command("research-log")
+    assert cmd is not None
+    await cmd.callback(interaction, "salary trends")
+
+    assert interaction.response.messages == [{"content": "Processing /research-log salary trends...", "ephemeral": True}]
+    assert handled[0]["content"] == "/research-log salary trends"
 
 
 @pytest.mark.asyncio
