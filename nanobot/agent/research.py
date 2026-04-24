@@ -38,6 +38,8 @@ Your job is not to answer quickly. Your job is to discover potentially interesti
 Rules:
 - Prefer local evidence first: rag_query, grep, glob, read_file, list_dir, exec.
 - Only use web tools when they are available and only to validate a candidate finding that already has local support.
+- Existing findings from prior runs count as local support.
+- When web validation is allowed, use at most 1-2 precise web_search calls to validate the strongest candidate claim, then continue recording findings or stop.
 - Record every worthwhile discovery with record_finding.
 - A finding must be either:
   - anomaly: surprising, counterintuitive, or unusual
@@ -79,6 +81,11 @@ def _merge_unique(items: list[str], extra: list[str]) -> list[str]:
 
 def _trim_text(value: str, limit: int = _MAX_FINDING_FIELD_CHARS) -> str:
     text = value.strip()
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _snippet(value: str, limit: int = 700) -> str:
+    text = " ".join(value.strip().split())
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
 
 
@@ -553,7 +560,8 @@ class ResearchEngine:
             "- If you have enough strong findings or the search space is exhausted, stop.",
         ]
         if allow_web_validation:
-            constraints.append("- Web validation is allowed this round, but only for locally-supported candidate findings.")
+            constraints.append("- Web validation is allowed this round. Existing findings also count as local support.")
+            constraints.append("- Use at most 1-2 precise web_search calls for the strongest candidate claim, then record/update findings and call research_control.")
         else:
             constraints.append("- Web validation is not allowed this round. Stay local.")
         user_prompt = "\n".join([
@@ -574,6 +582,61 @@ class ResearchEngine:
             {"role": "system", "content": _ROUND_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
+
+    def _candidate_web_queries(
+        self,
+        *,
+        topic: str,
+        findings: list[ResearchFinding],
+    ) -> list[str]:
+        if not findings:
+            return []
+        top = sorted(findings, key=lambda item: item.confidence, reverse=True)[0]
+        candidates: list[str] = []
+        for item in top.next_checks:
+            norm = " ".join(item.strip().split())
+            if norm:
+                candidates.append(norm)
+        if not candidates:
+            candidates.append(f"{top.title} {topic}")
+        if len(candidates) == 1:
+            candidates.append(f"{top.claim} official source")
+
+        queries: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            cleaned = _trim_text(candidate, 180)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                queries.append(cleaned)
+            if len(queries) >= 2:
+                break
+        return queries
+
+    async def _collect_web_validation_brief(
+        self,
+        *,
+        topic: str,
+        findings: list[ResearchFinding],
+    ) -> str:
+        if not findings:
+            return ""
+        web_tool = self.tool_source.get("web_search")
+        if web_tool is None:
+            return ""
+
+        sections = ["Web validation brief:"]
+        for query in self._candidate_web_queries(topic=topic, findings=findings):
+            logger.info("Research web validation query: {}", query)
+            try:
+                result = await web_tool.execute(query=query, count=3)
+            except Exception as exc:
+                result = f"Error: {exc}"
+            if not isinstance(result, str) or not result.strip():
+                continue
+            sections.append(f"- Query: {query}")
+            sections.append(f"  Result: {_snippet(result)}")
+        return "\n".join(sections) if len(sections) > 1 else ""
 
     async def _run_round(
         self,
@@ -662,14 +725,26 @@ class ResearchEngine:
                     stop_reason = f"Reached max findings ({self.config.max_findings})."
                     break
 
+                allow_web_validation = self.config.allow_web_validation and bool(
+                    existing_findings or run_findings
+                )
+                round_scoping_summary = scoping_summary
+                if allow_web_validation:
+                    web_brief = await self._collect_web_validation_brief(
+                        topic=topic,
+                        findings=self.store.merge_findings(existing_findings, run_findings),
+                    )
+                    if web_brief:
+                        round_scoping_summary = f"{scoping_summary}\n\n{web_brief}"
+
                 round_result = await self._run_round(
                     topic=topic,
-                    scoping_summary=scoping_summary,
+                    scoping_summary=round_scoping_summary,
                     existing_findings=self.store.merge_findings(existing_findings, run_findings),
                     round_index=round_index,
                     findings_remaining=max(self.config.max_findings - len(run_findings), 0),
                     stale_rounds=stale_rounds,
-                    allow_web_validation=self.config.allow_web_validation and bool(run_findings),
+                    allow_web_validation=allow_web_validation,
                 )
                 rounds.append(round_result)
                 run_findings = self.store.merge_findings(run_findings, round_result.findings)

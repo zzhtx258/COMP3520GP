@@ -166,3 +166,111 @@ async def test_research_findings_are_merged_across_runs(tmp_path) -> None:
     assert "data/content/2022/a.md" in findings_text
     assert "data/content/2023/b.md" in findings_text
     assert "0.88" in findings_text
+
+
+@pytest.mark.asyncio
+async def test_research_uses_existing_findings_to_enable_web_validation(tmp_path) -> None:
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=MagicMock(),
+        model="test-model",
+        tool_source=ToolRegistry(),
+        config=ResearchConfig(max_rounds=1, max_findings=3, max_stale_rounds=1, allow_web_validation=True),
+    )
+    engine.scope_topic = AsyncMock(return_value="- Validate existing findings against the web")
+    engine.store.write_findings(
+        "law topic",
+        [
+            ResearchFinding(
+                title="Law graduates often queue through PCLL",
+                kind="pattern",
+                claim="Existing local evidence suggests further studies are dominated by PCLL.",
+                why_interesting="It explains low direct-employment rates without implying weak outcomes.",
+                confidence=0.81,
+                evidence=["data/content/2023_law.md"],
+                next_checks=["Validate with official PCLL references"],
+            )
+        ],
+    )
+    engine._run_round = AsyncMock(
+        return_value=ResearchRoundResult(
+            findings=[],
+            action="stop",
+            reason="Validated enough for now.",
+            runner_result=_runner_result(tools_used=["web_search"]),
+        )
+    )
+
+    await engine.run("law topic")
+
+    assert engine._run_round.await_count == 1
+    assert engine._run_round.await_args.kwargs["allow_web_validation"] is True
+
+
+def test_round_messages_prompt_web_validation_from_existing_findings(tmp_path) -> None:
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=MagicMock(),
+        model="test-model",
+        tool_source=ToolRegistry(),
+        config=ResearchConfig(max_rounds=1, max_findings=3, max_stale_rounds=1, allow_web_validation=True),
+    )
+    messages = engine._build_round_messages(
+        topic="law topic",
+        scoping_summary="- Check further-studies pathways",
+        existing_findings=[
+            ResearchFinding(
+                title="Law graduates often queue through PCLL",
+                kind="pattern",
+                claim="Existing local evidence suggests further studies are dominated by PCLL.",
+                why_interesting="It explains low direct-employment rates without implying weak outcomes.",
+                confidence=0.81,
+                evidence=["data/content/2023_law.md"],
+                next_checks=["Validate with official PCLL references"],
+            )
+        ],
+        round_index=1,
+        findings_remaining=3,
+        stale_rounds=0,
+        allow_web_validation=True,
+    )
+    joined = "\n".join(m["content"] for m in messages)
+    assert "Existing findings from prior runs count as local support." in joined
+    assert "Use at most 1-2 precise web_search calls" in joined
+
+
+@pytest.mark.asyncio
+async def test_research_collects_web_validation_brief_from_existing_findings(tmp_path) -> None:
+    registry = ToolRegistry()
+    fake_web = MagicMock()
+    fake_web.name = "web_search"
+    fake_web.execute = AsyncMock(return_value="Results for: official PCLL source")
+    registry.register(fake_web)
+
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=MagicMock(),
+        model="test-model",
+        tool_source=registry,
+        config=ResearchConfig(max_rounds=1, max_findings=3, max_stale_rounds=1, allow_web_validation=True),
+    )
+
+    brief = await engine._collect_web_validation_brief(
+        topic="law topic",
+        findings=[
+            ResearchFinding(
+                title="Law graduates often queue through PCLL",
+                kind="pattern",
+                claim="Existing local evidence suggests further studies are dominated by PCLL.",
+                why_interesting="It explains low direct-employment rates without implying weak outcomes.",
+                confidence=0.81,
+                evidence=["data/content/2023_law.md"],
+                next_checks=["Validate with official HKU PLE / PCLL admissions references"],
+            )
+        ],
+    )
+
+    assert "Web validation brief:" in brief
+    assert "official HKU PLE / PCLL admissions references" in brief
+    assert "Results for: official PCLL source" in brief
+    assert fake_web.execute.await_count >= 1

@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import os
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -120,6 +122,27 @@ def _summarize_rag_output(text: str, max_chars: int = _RAG_LOG_OUTPUT_MAX_CHARS)
     if not normalized:
         return "(empty)"
     return truncate_text(normalized, max_chars) if len(normalized) > max_chars else normalized
+
+
+def _ensure_runtime_bin_on_path() -> None:
+    """Ensure sibling console scripts for the active Python are discoverable.
+
+    RAGAnything verifies MinerU by spawning the ``mineru`` CLI. When nanobot is
+    launched via an absolute interpreter path (for example in ``nohup`` or a
+    service unit), the process PATH may omit the current environment's ``bin``
+    directory even though ``sys.executable`` points into that environment.
+    """
+    runtime_bin = Path(sys.executable).resolve().parent
+    if not runtime_bin.exists():
+        return
+    current = os.environ.get("PATH", "")
+    parts = current.split(os.pathsep) if current else []
+    runtime_bin_str = str(runtime_bin)
+    if runtime_bin_str in parts:
+        return
+    os.environ["PATH"] = (
+        runtime_bin_str if not current else os.pathsep.join([runtime_bin_str, current])
+    )
 
 
 @contextmanager
@@ -370,6 +393,7 @@ class RAGQueryTool(Tool):
     async def _get_rag(self) -> Any:
         async with self._lock:
             if self._rag is None:
+                _ensure_runtime_bin_on_path()
                 from raganything import RAGAnything, RAGAnythingConfig
                 quiet_logs = _RAG_RUNTIME_LOGS_SUPPRESSED.get()
                 with _silence_external_rag_loggers(quiet_logs):

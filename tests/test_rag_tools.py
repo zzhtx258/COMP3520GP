@@ -250,6 +250,22 @@ def test_summarize_rag_output_truncates_long_logs() -> None:
     assert summarized.endswith("... (truncated)")
 
 
+def test_ensure_runtime_bin_on_path_prepends_python_bin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.agent.tools.rag import _ensure_runtime_bin_on_path
+
+    runtime_bin = tmp_path / "bin"
+    runtime_bin.mkdir()
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setattr("sys.executable", str(runtime_bin / "python"))
+
+    _ensure_runtime_bin_on_path()
+
+    assert os.environ["PATH"].startswith(f"{runtime_bin}:")
+
+
 async def test_rag_grep_forces_output_root_and_md_only(tmp_path: Path) -> None:
     from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool
 
