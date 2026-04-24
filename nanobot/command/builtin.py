@@ -163,19 +163,57 @@ async def cmd_research(ctx: CommandContext) -> OutboundMessage:
         )
 
     session_key = ctx.key or msg.session_key
+    topic_slug = loop.research.store.topic_slug(topic)
+    started_at = asyncio.get_running_loop().time()
+    loop._research_status.setdefault(session_key, {})[topic_slug] = {
+        "topic": topic,
+        "status": "running",
+        "started_at": started_at,
+        "updated_at": started_at,
+        "summary": "",
+        "run_path": None,
+        "findings_path": None,
+        "error": None,
+    }
 
     async def _run_research() -> None:
         try:
             result = await loop.research.run(topic)
             content = result.summary
+            loop._research_status.setdefault(session_key, {})[topic_slug] = {
+                "topic": topic,
+                "status": "done",
+                "started_at": started_at,
+                "updated_at": asyncio.get_running_loop().time(),
+                "summary": result.summary,
+                "run_path": str(result.run_path),
+                "findings_path": str(result.findings_path),
+                "error": None,
+            }
         except asyncio.CancelledError:
             content = f"Research stopped for `{topic}`."
-            raise
+            loop._research_status.setdefault(session_key, {})[topic_slug] = {
+                "topic": topic,
+                "status": "cancelled",
+                "started_at": started_at,
+                "updated_at": asyncio.get_running_loop().time(),
+                "summary": content,
+                "run_path": None,
+                "findings_path": None,
+                "error": None,
+            }
         except Exception as e:
             content = f"Research failed for `{topic}`: {e}"
-        finally:
-            # Cleanup is handled by done callbacks; this just ensures outbound is attempted.
-            pass
+            loop._research_status.setdefault(session_key, {})[topic_slug] = {
+                "topic": topic,
+                "status": "failed",
+                "started_at": started_at,
+                "updated_at": asyncio.get_running_loop().time(),
+                "summary": content,
+                "run_path": None,
+                "findings_path": None,
+                "error": str(e),
+            }
         await loop.bus.publish_outbound(
             OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
         )
@@ -194,6 +232,55 @@ async def cmd_research(ctx: CommandContext) -> OutboundMessage:
             "Use `/research-stop` to cancel it, or `/research-log "
             f"{topic}` to inspect the latest run after it finishes."
         ),
+    )
+
+
+async def cmd_research_status(ctx: CommandContext) -> OutboundMessage:
+    """Show current or recent research task status for the session."""
+    session_key = ctx.key or ctx.msg.session_key
+    status_map = ctx.loop._research_status.get(session_key, {})
+    query = ctx.args.strip()
+
+    if not status_map:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="No research tasks have been started in this session yet.",
+            metadata={"render_as": "text"},
+        )
+
+    records: list[dict] = list(status_map.values())
+    if query:
+        slug = ctx.loop.research.store.topic_slug(query)
+        record = status_map.get(slug)
+        if not record:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=f"No research task found for `{query}` in this session.",
+                metadata={"render_as": "text"},
+            )
+        records = [record]
+
+    lines = ["## Research Status", ""]
+    for record in sorted(records, key=lambda item: item.get("updated_at", 0.0), reverse=True):
+        lines.append(f"- Topic: `{record['topic']}`")
+        lines.append(f"  Status: `{record['status']}`")
+        if record.get("summary"):
+            lines.append(f"  Summary: {record['summary']}")
+        if record.get("run_path"):
+            lines.append(f"  Run log: `{record['run_path']}`")
+        if record.get("findings_path"):
+            lines.append(f"  Findings: `{record['findings_path']}`")
+        if record.get("error"):
+            lines.append(f"  Error: `{record['error']}`")
+        lines.append("")
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="\n".join(lines).rstrip(),
+        metadata={"render_as": "text"},
     )
 
 
@@ -433,6 +520,7 @@ def build_help_text() -> str:
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
         "/research <topic> — Run a bounded research loop for a topic",
+        "/research-status — Show research task status in this session",
         "/research-log <topic> — Show the latest research log for a topic",
         "/research-stop — Stop the current research task",
         "/help — Show available commands",
@@ -455,6 +543,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/research-stop", cmd_research_stop)
     router.exact("/research", cmd_research)
     router.prefix("/research ", cmd_research)
+    router.exact("/research-status", cmd_research_status)
+    router.prefix("/research-status ", cmd_research_status)
     router.exact("/research-log", cmd_research_log)
     router.prefix("/research-log ", cmd_research_log)
     router.exact("/help", cmd_help)

@@ -138,6 +138,7 @@ if DISCORD_AVAILABLE:
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
+                ("research-status", "Show current or recent research task status", "/research-status"),
                 ("research-stop", "Stop the current research task", "/research-stop"),
             )
 

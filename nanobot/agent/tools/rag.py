@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +17,11 @@ from nanobot.providers.base import LLMResponse
 from nanobot.utils.helpers import truncate_text
 
 _RAG_LOG_OUTPUT_MAX_CHARS = 2000
+_RAG_RUNTIME_LOGS_SUPPRESSED: ContextVar[bool] = ContextVar(
+    "rag_runtime_logs_suppressed",
+    default=True,
+)
+_RAG_NOISY_LOGGERS = ("lightrag", "nano-vectordb")
 
 _RAG_CONTEXT_ANALYST_SYSTEM_PROMPT = """You are preparing retrieved knowledge-graph context for another agent.
 
@@ -114,13 +122,43 @@ def _summarize_rag_output(text: str, max_chars: int = _RAG_LOG_OUTPUT_MAX_CHARS)
     return truncate_text(normalized, max_chars) if len(normalized) > max_chars else normalized
 
 
+@contextmanager
+def suppress_rag_runtime_logs(enabled: bool = True):
+    """Suppress noisy RAG runtime logs within the current async context."""
+    token = _RAG_RUNTIME_LOGS_SUPPRESSED.set(enabled)
+    try:
+        yield
+    finally:
+        _RAG_RUNTIME_LOGS_SUPPRESSED.reset(token)
+
+
+@contextmanager
+def _silence_external_rag_loggers(enabled: bool):
+    """Temporarily raise noisy third-party RAG loggers to ERROR."""
+    if not enabled:
+        yield
+        return
+
+    previous: dict[str, int] = {}
+    try:
+        for name in _RAG_NOISY_LOGGERS:
+            logger_obj = logging.getLogger(name)
+            previous[name] = logger_obj.level
+            logger_obj.setLevel(logging.ERROR)
+        yield
+    finally:
+        for name, level in previous.items():
+            logging.getLogger(name).setLevel(level)
+
+
 async def warmup_rag_addon(loop: Any) -> None:
     """Pre-initialize the LightRAG instance in the background at loop startup."""
     tool = loop.tools.get("rag_query")
     if tool is None or not isinstance(tool, RAGQueryTool):
         return
     try:
-        await tool._get_rag()
+        with suppress_rag_runtime_logs(True):
+            await tool._get_rag()
     except Exception as exc:
         from lightrag.utils import logger as rag_logger
         rag_logger.warning(f"RAG warmup failed: {exc}")
@@ -333,14 +371,15 @@ class RAGQueryTool(Tool):
         async with self._lock:
             if self._rag is None:
                 from raganything import RAGAnything, RAGAnythingConfig
-
-                rag = RAGAnything(
-                    config=RAGAnythingConfig(working_dir=self._storage_dir),
-                    llm_model_func=self._llm_model_func,
-                    vision_model_func=None,
-                    embedding_func=self._embedding_func,
-                )
-                init_result = await rag._ensure_lightrag_initialized()
+                quiet_logs = _RAG_RUNTIME_LOGS_SUPPRESSED.get()
+                with _silence_external_rag_loggers(quiet_logs):
+                    rag = RAGAnything(
+                        config=RAGAnythingConfig(working_dir=self._storage_dir),
+                        llm_model_func=self._llm_model_func,
+                        vision_model_func=None,
+                        embedding_func=self._embedding_func,
+                    )
+                    init_result = await rag._ensure_lightrag_initialized()
                 if not init_result.get("success"):
                     raise RuntimeError(
                         f"Failed to initialize LightRAG: {init_result.get('error')}"
@@ -397,21 +436,25 @@ class RAGQueryTool(Tool):
         top_k: int = 60,
         **kwargs: Any,
     ) -> str:
-        logger.info("rag_query: query=%r mode=%s top_k=%d", query, mode, top_k)
+        quiet_logs = _RAG_RUNTIME_LOGS_SUPPRESSED.get()
+        if not quiet_logs:
+            logger.info("rag_query: query=%r mode=%s top_k=%d", query, mode, top_k)
         try:
-            rag = await self._get_rag()
+            with _silence_external_rag_loggers(quiet_logs):
+                rag = await self._get_rag()
         except Exception as exc:
             return (
                 f"RAG initialisation failed — the index may not be built yet or the config is invalid: {exc}. "
                 "Do not retry this tool. Fall back to grep on data/content for exact keyword matches."
             )
         try:
-            result = await rag.aquery(
-                query,
-                mode=mode,
-                top_k=top_k,
-                only_need_context=True,
-            )
+            with _silence_external_rag_loggers(quiet_logs):
+                result = await rag.aquery(
+                    query,
+                    mode=mode,
+                    top_k=top_k,
+                    only_need_context=True,
+                )
         except Exception as exc:
             return (
                 f"RAG query failed (transient error — you may retry with a rephrased query): {exc}. "
@@ -425,7 +468,9 @@ class RAGQueryTool(Tool):
                 "(3) break the question into smaller sub-queries."
             )
         result_str = str(result)
-        logger.debug("rag_query: returned %d chars", len(result_str))
+        if not quiet_logs:
+            logger.debug("rag_query: returned %d chars", len(result_str))
         analyzed = await self._analyze_context(query, result_str)
-        logger.info("rag_query output -> {}", _summarize_rag_output(analyzed))
+        if not quiet_logs:
+            logger.info("rag_query output -> {}", _summarize_rag_output(analyzed))
         return analyzed

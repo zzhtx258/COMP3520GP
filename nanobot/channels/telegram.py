@@ -215,6 +215,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("research", "Run a bounded research loop for a topic"),
+        BotCommand("research_status", "Show current or recent research task status"),
         BotCommand("research_log", "Show the latest research log for a topic"),
         BotCommand("research_stop", "Stop the current research task"),
         BotCommand("help", "Show available commands"),
@@ -271,6 +272,8 @@ class TelegramChannel(BaseChannel):
             return content.replace("/research_log", "/research-log", 1)
         if content == "/research_stop" or content.startswith("/research_stop "):
             return content.replace("/research_stop", "/research-stop", 1)
+        if content == "/research_status" or content.startswith("/research_status "):
+            return content.replace("/research_status", "/research-status", 1)
         return content
 
     async def start(self) -> None:
@@ -324,7 +327,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(
             MessageHandler(
                 filters.Regex(
-                    r"^/(research|research-log|research_log|research-stop|research_stop)(?:@\w+)?(?:\s+.*)?$"
+                    r"^/(research|research-log|research_log|research-stop|research_stop|research-status|research_status)(?:@\w+)?(?:\s+.*)?$"
                 ),
                 self._forward_command,
             )

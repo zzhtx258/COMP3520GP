@@ -438,6 +438,60 @@ async def test_rag_query_skips_analysis_for_short_context() -> None:
     assert provider.called is False
 
 
+async def test_rag_query_suppresses_its_own_logs_in_quiet_context(monkeypatch) -> None:
+    from nanobot.agent.tools import rag as rag_module
+    from nanobot.agent.tools.rag import RAGQueryTool, suppress_rag_runtime_logs
+
+    class FakeRAG:
+        async def aquery(self, *_args, **_kwargs):
+            return "quiet context"
+
+    tool = RAGQueryTool(
+        storage_dir=".",
+        llm_model_func=lambda *_a, **_k: "ok",
+        embedding_func=object(),
+    )
+    tool._rag = FakeRAG()
+
+    recorded: list[tuple[str, tuple, dict]] = []
+    monkeypatch.setattr(
+        rag_module.logger,
+        "info",
+        lambda *args, **kwargs: recorded.append(("info", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        rag_module.logger,
+        "debug",
+        lambda *args, **kwargs: recorded.append(("debug", args, kwargs)),
+    )
+
+    with suppress_rag_runtime_logs(True):
+        result = await tool.execute("quiet query", mode="mix")
+
+    assert result == "quiet context"
+    assert recorded == []
+
+
+async def test_warmup_rag_addon_uses_quiet_context(monkeypatch) -> None:
+    from nanobot.agent.tools import rag as rag_module
+
+    class FakeTool:
+        def __init__(self) -> None:
+            self.quiet_flags: list[bool] = []
+
+        async def _get_rag(self):
+            self.quiet_flags.append(rag_module._RAG_RUNTIME_LOGS_SUPPRESSED.get())
+            return object()
+
+    tool = FakeTool()
+    loop = SimpleNamespace(tools=SimpleNamespace(get=lambda name: tool if name == "rag_query" else None))
+    monkeypatch.setattr(rag_module, "RAGQueryTool", FakeTool)
+
+    await rag_module.warmup_rag_addon(loop)
+
+    assert tool.quiet_flags == [True]
+
+
 @pytest.mark.skipif(not OUTPUT_DIR, reason="RAG_OUTPUT_DIR not set")
 async def test_rag_grep_finds_markdown():
     from nanobot.agent.tools.rag_grep import RAGMarkdownGrepTool

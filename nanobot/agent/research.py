@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.agent.runner import AgentRunResult, AgentRunSpec, AgentRunner
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.rag import suppress_rag_runtime_logs
 from nanobot.config.schema import ResearchConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.helpers import ensure_dir
@@ -648,76 +649,77 @@ class ResearchEngine:
 
     async def run(self, topic: str) -> ResearchRunResult:
         """Run one bounded research session for the provided topic."""
-        existing_findings = self.store.load_findings(topic)
-        scoping_summary = await self.scope_topic(topic)
-        run_findings: list[ResearchFinding] = []
-        rounds: list[ResearchRoundResult] = []
-        stale_rounds = 0
-        stop_reason = "Reached max rounds."
+        with suppress_rag_runtime_logs(True):
+            existing_findings = self.store.load_findings(topic)
+            scoping_summary = await self.scope_topic(topic)
+            run_findings: list[ResearchFinding] = []
+            rounds: list[ResearchRoundResult] = []
+            stale_rounds = 0
+            stop_reason = "Reached max rounds."
 
-        for round_index in range(1, self.config.max_rounds + 1):
-            if len(run_findings) >= self.config.max_findings:
-                stop_reason = f"Reached max findings ({self.config.max_findings})."
-                break
+            for round_index in range(1, self.config.max_rounds + 1):
+                if len(run_findings) >= self.config.max_findings:
+                    stop_reason = f"Reached max findings ({self.config.max_findings})."
+                    break
 
-            round_result = await self._run_round(
-                topic=topic,
+                round_result = await self._run_round(
+                    topic=topic,
+                    scoping_summary=scoping_summary,
+                    existing_findings=self.store.merge_findings(existing_findings, run_findings),
+                    round_index=round_index,
+                    findings_remaining=max(self.config.max_findings - len(run_findings), 0),
+                    stale_rounds=stale_rounds,
+                    allow_web_validation=self.config.allow_web_validation and bool(run_findings),
+                )
+                rounds.append(round_result)
+                run_findings = self.store.merge_findings(run_findings, round_result.findings)
+
+                if round_result.findings:
+                    stale_rounds = 0
+                else:
+                    stale_rounds += 1
+
+                if len(run_findings) >= self.config.max_findings:
+                    stop_reason = f"Reached max findings ({self.config.max_findings})."
+                    break
+                if round_result.action == "stop":
+                    stop_reason = round_result.reason
+                    break
+                if stale_rounds >= self.config.max_stale_rounds:
+                    stop_reason = f"No new high-quality findings for {stale_rounds} round(s)."
+                    break
+
+            merged_findings = self.store.merge_findings(existing_findings, run_findings)
+            findings_path = self.store.write_findings(topic, merged_findings)
+            run_path = self.store.write_run_log(
+                topic,
                 scoping_summary=scoping_summary,
-                existing_findings=self.store.merge_findings(existing_findings, run_findings),
-                round_index=round_index,
-                findings_remaining=max(self.config.max_findings - len(run_findings), 0),
-                stale_rounds=stale_rounds,
-                allow_web_validation=self.config.allow_web_validation and bool(run_findings),
+                findings=run_findings,
+                rounds=rounds,
+                stop_reason=stop_reason,
             )
-            rounds.append(round_result)
-            run_findings = self.store.merge_findings(run_findings, round_result.findings)
-
-            if round_result.findings:
-                stale_rounds = 0
-            else:
-                stale_rounds += 1
-
-            if len(run_findings) >= self.config.max_findings:
-                stop_reason = f"Reached max findings ({self.config.max_findings})."
-                break
-            if round_result.action == "stop":
-                stop_reason = round_result.reason
-                break
-            if stale_rounds >= self.config.max_stale_rounds:
-                stop_reason = f"No new high-quality findings for {stale_rounds} round(s)."
-                break
-
-        merged_findings = self.store.merge_findings(existing_findings, run_findings)
-        findings_path = self.store.write_findings(topic, merged_findings)
-        run_path = self.store.write_run_log(
-            topic,
-            scoping_summary=scoping_summary,
-            findings=run_findings,
-            rounds=rounds,
-            stop_reason=stop_reason,
-        )
-        summary = self._format_run_summary(
-            topic=topic,
-            findings=run_findings,
-            stop_reason=stop_reason,
-            run_path=run_path,
-            findings_path=findings_path,
-            rounds_run=len(rounds),
-        )
-        logger.info(
-            "Research finished topic='{}' rounds={} findings={} stop_reason={}",
-            topic,
-            len(rounds),
-            len(run_findings),
-            stop_reason,
-        )
-        return ResearchRunResult(
-            topic=topic,
-            topic_slug=self.store.topic_slug(topic),
-            summary=summary,
-            run_path=run_path,
-            findings_path=findings_path,
-            findings=run_findings,
-            stop_reason=stop_reason,
-            rounds_run=len(rounds),
-        )
+            summary = self._format_run_summary(
+                topic=topic,
+                findings=run_findings,
+                stop_reason=stop_reason,
+                run_path=run_path,
+                findings_path=findings_path,
+                rounds_run=len(rounds),
+            )
+            logger.info(
+                "Research finished topic='{}' rounds={} findings={} stop_reason={}",
+                topic,
+                len(rounds),
+                len(run_findings),
+                stop_reason,
+            )
+            return ResearchRunResult(
+                topic=topic,
+                topic_slug=self.store.topic_slug(topic),
+                summary=summary,
+                run_path=run_path,
+                findings_path=findings_path,
+                findings=run_findings,
+                stop_reason=stop_reason,
+                rounds_run=len(rounds),
+            )
