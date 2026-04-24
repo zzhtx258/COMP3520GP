@@ -231,13 +231,14 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # Note: duckduckgo_search is synchronous and does its own requests
-            # We run it in a thread to avoid blocking the loop
+            # DDGS search is synchronous and may return a lazy iterator. Materialize
+            # results inside the worker thread so asyncio.wait_for covers the actual
+            # network work instead of only iterator creation.
             from ddgs import DDGS
 
             ddgs = DDGS(timeout=10)
             raw = await asyncio.wait_for(
-                asyncio.to_thread(ddgs.text, query, max_results=n),
+                asyncio.to_thread(lambda: list(ddgs.text(query, max_results=n))),
                 timeout=self.config.timeout,
             )
             if not raw:

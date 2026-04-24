@@ -267,3 +267,34 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     assert "Error" in result
 
 
+@pytest.mark.asyncio
+async def test_duckduckgo_lazy_iterator_timeout_is_caught(monkeypatch):
+    """Timeout must cover lazy iteration work, not just DDGS iterator creation."""
+    import threading
+
+    gate = threading.Event()
+
+    class LazyDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            def _gen():
+                gate.wait(timeout=10)
+                yield {
+                    "title": "Late result",
+                    "href": "https://ddg.example",
+                    "body": "This should time out",
+                }
+
+            return _gen()
+
+    monkeypatch.setattr("ddgs.DDGS", LazyDDGS)
+    tool = _tool(provider="duckduckgo")
+    tool.config.timeout = 0.2
+
+    result = await tool.execute(query="test")
+
+    gate.set()
+    assert "Error" in result
+
