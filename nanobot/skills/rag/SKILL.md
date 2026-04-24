@@ -28,6 +28,8 @@ Treat the `rag_query` string as a retrieval query, not a task instruction.
 - Include likely table/header variants together when useful, e.g. `mean salary average monthly salary gross income basic salary`.
 - For cross-year or cross-programme work, let `rag_query` scope the files/aliases first; do not ask it to "rank", "compare", or "calculate" in the query string.
 - Remove workflow phrasing such as `先找出`, `再判断`, `不要直接`, `总结`, `first`, `then`, `summarize`, `rank`, `compute`.
+- For graduate employment evidence, do not stop at a single year unless the user explicitly asks for that year only. When the user asks about a programme trend, comparison, explanation, or “why” question, actively look across multiple relevant years before concluding.
+- If only one year has been checked so far, mark the finding as provisional and continue searching nearby/relevant years to reduce sample bias.
 
 Good:
 
@@ -57,7 +59,8 @@ If cross-slice counting, comparison, or trend assembly is required, treat the qu
 **Easy question:**
 1. Use grep for exact-match lookups, or rag_query for open-ended entity discovery.
 2. Verify with targeted follow-up if needed.
-3. Answer directly.
+3. If the question is about graduate employment patterns or explanations, sanity-check whether more than one year should be inspected before answering.
+4. Answer directly.
 
 **Hard question:**
 1. Call rag_query once with a broad scoping query to identify: relevant years, degree names, file paths, section headings, entity aliases.
@@ -100,6 +103,7 @@ Charts and numeric totals must come from this evidence table — not from narrat
 **Hard questions:**
 - Lead with the grounded result.
 - Claim only what is supported by the evidence table.
+- For graduate employment conclusions, prefer evidence spanning multiple years; if only one year was available or checked, say so explicitly.
 - If any slice has status `partial` or `failed`, explicitly state the result is **incomplete** and identify the missing slices.
 - Do not add macro-level narrative explanations unless separately supported by retrieved evidence.
 - Output this status line on its own line immediately before the answer text: `[hard-query: subagents=yes|no, answer=complete|partial]`

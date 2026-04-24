@@ -46,6 +46,8 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 - Do not jump straight to broad patterns like `data/content/*/*/hybrid_auto/*.md` unless you have already scoped the target folders and specifically need parsed markdown files.
 - For broad, fuzzy, or context-heavy document questions, prefer `rag_query`.
 - When calling `rag_query`, rewrite the user's ask into corpus-facing retrieval terms: prefer exact field labels, headings, entity aliases, programme names, years, and English corpus vocabulary; avoid workflow phrasing like "first", "then", "summarize", ranking instructions, or long natural-language task descriptions.
+- For graduate employment findings, avoid conclusions from a single year unless the user explicitly asks for one year only. By default, check multiple relevant years before claiming a pattern, comparison, or explanation.
+- If you only found evidence from one year so far, treat it as preliminary and continue searching other nearby or relevant years to reduce bias.
 - On broad searches, use `grep(output_mode="count")` to scope before requesting full content.
 - For calculations, comparisons, or data analysis, you must consider writing and running code instead of reasoning manually.
 - For very large data, or when a task spans multiple files/groups that can be handled independently, you must consider using a subagent.
