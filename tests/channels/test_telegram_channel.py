@@ -569,6 +569,57 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_supports_research_prompt_keyboard() -> None:
+    from telegram import ReplyKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Send the research topic next.",
+            metadata={
+                "telegram_reply_keyboard": [["cancel"]],
+                "telegram_resize_keyboard": True,
+                "telegram_one_time_keyboard": True,
+            },
+        )
+    )
+
+    reply_markup = channel._app.bot.sent_messages[0]["reply_markup"]
+    assert isinstance(reply_markup, ReplyKeyboardMarkup)
+    assert reply_markup.keyboard[0][0].text == "cancel"
+
+
+@pytest.mark.asyncio
+async def test_send_supports_research_prompt_keyboard_removal() -> None:
+    from telegram import ReplyKeyboardRemove
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Cancelled pending research request.",
+            metadata={"telegram_remove_keyboard": True},
+        )
+    )
+
+    reply_markup = channel._app.bot.sent_messages[0]["reply_markup"]
+    assert isinstance(reply_markup, ReplyKeyboardRemove)
+
+
+@pytest.mark.asyncio
 async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),

@@ -22,6 +22,7 @@ from nanobot.utils.helpers import ensure_dir
 _FINDING_COMMENT_PREFIX = "research-finding:"
 _FINDING_COMMENT_RE = re.compile(r"<!--\s*research-finding:\s*(\{.*?\})\s*-->")
 _MAX_FINDING_FIELD_CHARS = 1200
+_IMPLICIT_STOP_REASON = "Model ended the round without calling research_control."
 _SCOPING_SYSTEM_PROMPT = """You are preparing a bounded research plan for a tool-using agent.
 
 Turn a broad topic into:
@@ -47,6 +48,7 @@ Rules:
 - Favor findings with specific evidence: file paths, years, programme names, employer names, table fields, or quoted snippets.
 - Do not write files directly. The host system will persist findings for you.
 - End each round by calling research_control with either continue or stop.
+- Never end a round silently. If you are unsure, call research_control(continue) instead of stopping without it.
 
 Quality bar:
 - Interestingness: would a human researcher care?
@@ -671,7 +673,7 @@ class ResearchEngine:
             )
         )
         action = state.action or "stop"
-        reason = state.reason or "Model ended the round without calling research_control."
+        reason = state.reason or _IMPLICIT_STOP_REASON
         used_web_validation = any(
             tool_name in self._WEB_TOOL_NAMES for tool_name in (result.tools_used or [])
         )
@@ -757,10 +759,18 @@ class ResearchEngine:
                 if len(run_findings) >= self.config.max_findings:
                     stop_reason = f"Reached max findings ({self.config.max_findings})."
                     break
-                if round_result.action == "stop":
+                if (
+                    round_result.action == "stop"
+                    and round_result.reason == _IMPLICIT_STOP_REASON
+                    and not round_result.findings
+                ):
+                    if stale_rounds >= self.config.max_stale_rounds:
+                        stop_reason = f"No new high-quality findings for {stale_rounds} round(s)."
+                        break
+                elif round_result.action == "stop":
                     stop_reason = round_result.reason
                     break
-                if stale_rounds >= self.config.max_stale_rounds:
+                elif stale_rounds >= self.config.max_stale_rounds:
                     stop_reason = f"No new high-quality findings for {stale_rounds} round(s)."
                     break
 

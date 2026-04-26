@@ -112,6 +112,40 @@ async def test_research_run_stops_after_stale_rounds(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_research_run_does_not_stop_immediately_on_implicit_empty_round(tmp_path) -> None:
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=MagicMock(),
+        model="test-model",
+        tool_source=ToolRegistry(),
+        config=ResearchConfig(max_rounds=5, max_findings=4, max_stale_rounds=2),
+    )
+    engine.scope_topic = AsyncMock(return_value="- Search employer clusters")
+    engine._run_round = AsyncMock(
+        side_effect=[
+            ResearchRoundResult(
+                findings=[],
+                action="stop",
+                reason="Model ended the round without calling research_control.",
+                runner_result=_runner_result(final_content="Looked around but did not conclude."),
+            ),
+            ResearchRoundResult(
+                findings=[],
+                action="stop",
+                reason="Model ended the round without calling research_control.",
+                runner_result=_runner_result(final_content="Still no findings."),
+            ),
+        ]
+    )
+
+    result = await engine.run("broad employer trends")
+
+    assert result.rounds_run == 2
+    assert result.stop_reason == "No new high-quality findings for 2 round(s)."
+    assert engine._run_round.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_research_findings_are_merged_across_runs(tmp_path) -> None:
     engine = ResearchEngine(
         workspace=tmp_path,

@@ -219,6 +219,7 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._research_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> research tasks
         self._research_status: dict[str, dict[str, dict[str, Any]]] = {}
+        self._pending_research_prompts: dict[str, dict[str, Any]] = {}
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.

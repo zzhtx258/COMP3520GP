@@ -11,7 +11,15 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import (
+    BotCommand,
+    KeyboardButton,
+    ReactionTypeEmoji,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -408,6 +416,26 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
+    @staticmethod
+    def _build_reply_markup(metadata: dict[str, Any] | None):
+        """Translate generic outbound metadata into Telegram reply markup."""
+        meta = metadata or {}
+        if meta.get("telegram_remove_keyboard"):
+            return ReplyKeyboardRemove()
+
+        rows = meta.get("telegram_reply_keyboard")
+        if rows:
+            keyboard = [
+                [button if isinstance(button, KeyboardButton) else KeyboardButton(str(button)) for button in row]
+                for row in rows
+            ]
+            return ReplyKeyboardMarkup(
+                keyboard=keyboard,
+                resize_keyboard=bool(meta.get("telegram_resize_keyboard", True)),
+                one_time_keyboard=bool(meta.get("telegram_one_time_keyboard", False)),
+            )
+        return None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
@@ -443,6 +471,7 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+        reply_markup = self._build_reply_markup(msg.metadata)
 
         # Send media files
         for media_path in (msg.media or []):
@@ -465,6 +494,7 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id,
                         **{param: media_path},
                         reply_parameters=reply_params,
+                        reply_markup=reply_markup,
                         **thread_kwargs,
                     )
                     continue
@@ -474,6 +504,7 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id,
                         **{param: f},
                         reply_parameters=reply_params,
+                        reply_markup=reply_markup,
                         **thread_kwargs,
                     )
             except Exception as e:
@@ -483,6 +514,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **thread_kwargs,
                 )
 
@@ -493,6 +525,7 @@ class TelegramChannel(BaseChannel):
                 await self._send_text(
                     chat_id, chunk, reply_params, thread_kwargs,
                     render_as_blockquote=render_as_blockquote,
+                    reply_markup=reply_markup,
                 )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
@@ -528,6 +561,7 @@ class TelegramChannel(BaseChannel):
         reply_params=None,
         thread_kwargs: dict | None = None,
         render_as_blockquote: bool = False,
+        reply_markup=None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
@@ -536,6 +570,7 @@ class TelegramChannel(BaseChannel):
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -546,6 +581,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:

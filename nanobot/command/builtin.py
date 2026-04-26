@@ -5,12 +5,45 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from typing import Any
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+
+
+_RESEARCH_CANCEL_TOKENS = {"cancel"}
+
+
+def _research_prompt_metadata(msg, *, remove_keyboard: bool = False) -> dict[str, Any]:
+    """Build channel-aware metadata for research topic prompt UX."""
+    metadata = dict(msg.metadata or {})
+    metadata["render_as"] = "text"
+    if msg.channel == "telegram":
+        if remove_keyboard:
+            metadata["telegram_remove_keyboard"] = True
+            metadata.pop("telegram_reply_keyboard", None)
+        else:
+            metadata["telegram_reply_keyboard"] = [["cancel"]]
+            metadata["telegram_resize_keyboard"] = True
+            metadata["telegram_one_time_keyboard"] = True
+    return metadata
+
+
+def _pending_research_prompts(loop) -> dict[str, dict[str, Any]]:
+    """Return the per-session pending research topic prompt state."""
+    mapping = getattr(loop, "_pending_research_prompts", None)
+    if mapping is None:
+        mapping = {}
+        setattr(loop, "_pending_research_prompts", mapping)
+    return mapping
+
+
+def _clear_pending_research_prompt(loop, session_key: str) -> dict[str, Any] | None:
+    """Remove and return the pending research prompt state for a session."""
+    return _pending_research_prompts(loop).pop(session_key, None)
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -100,6 +133,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         active_tasks.pop(key, None)
     if research_status := getattr(loop, "_research_status", None):
         research_status.pop(key, None)
+    had_pending_research_prompt = _clear_pending_research_prompt(loop, key) is not None
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
@@ -108,7 +142,11 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
-        metadata=dict(ctx.msg.metadata or {})
+        metadata=(
+            _research_prompt_metadata(ctx.msg, remove_keyboard=True)
+            if had_pending_research_prompt
+            else dict(ctx.msg.metadata or {})
+        )
     )
 
 
@@ -176,20 +214,18 @@ def _persist_research_summary(loop, session_key: str, content: str) -> None:
     sessions.save(session)
 
 
-async def cmd_research(ctx: CommandContext) -> OutboundMessage:
+async def _start_research_task(
+    ctx: CommandContext,
+    topic: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> OutboundMessage:
     """Start a bounded research loop for a topic."""
     loop = ctx.loop
     msg = ctx.msg
-    topic = ctx.args.strip()
-    if not topic:
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="Usage: `/research <topic>`",
-            metadata={"render_as": "text"},
-        )
-
     session_key = ctx.key or msg.session_key
+    _clear_pending_research_prompt(loop, session_key)
+
     topic_slug = loop.research.store.topic_slug(topic)
     started_at = asyncio.get_running_loop().time()
     loop._research_status.setdefault(session_key, {})[topic_slug] = {
@@ -260,6 +296,53 @@ async def cmd_research(ctx: CommandContext) -> OutboundMessage:
             "Use `/research-stop` to cancel it, or `/research-log "
             f"{topic}` to inspect the latest run after it finishes."
         ),
+        metadata=metadata or dict(msg.metadata or {}),
+    )
+
+
+async def cmd_research(ctx: CommandContext) -> OutboundMessage:
+    """Start a bounded research loop for a topic, or prompt for one."""
+    topic = ctx.args.strip()
+    session_key = ctx.key or ctx.msg.session_key
+    if not topic:
+        _pending_research_prompts(ctx.loop)[session_key] = {"awaiting_topic": True}
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Send the research topic in your next message, or send `cancel` to abort.",
+            metadata=_research_prompt_metadata(ctx.msg),
+        )
+    return await _start_research_task(ctx, topic)
+
+
+async def intercept_pending_research_topic(ctx: CommandContext) -> OutboundMessage | None:
+    """Treat the next non-command message as a research topic when prompted."""
+    session_key = ctx.key or ctx.msg.session_key
+    if session_key not in _pending_research_prompts(ctx.loop):
+        return None
+
+    topic = ctx.raw.strip()
+    if not topic:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Send the research topic in your next message, or send `cancel` to abort.",
+            metadata=_research_prompt_metadata(ctx.msg),
+        )
+
+    if topic.lower() in _RESEARCH_CANCEL_TOKENS:
+        _clear_pending_research_prompt(ctx.loop, session_key)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Cancelled pending research request.",
+            metadata=_research_prompt_metadata(ctx.msg, remove_keyboard=True),
+        )
+
+    return await _start_research_task(
+        ctx,
+        topic,
+        metadata=_research_prompt_metadata(ctx.msg, remove_keyboard=True),
     )
 
 
@@ -576,3 +659,4 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/research-log", cmd_research_log)
     router.prefix("/research-log ", cmd_research_log)
     router.exact("/help", cmd_help)
+    router.intercept(intercept_pending_research_topic)
