@@ -149,6 +149,16 @@ def _remove_tracked_task(mapping: dict[str, list[asyncio.Task]], key: str, task:
         mapping.pop(key, None)
 
 
+def _persist_research_summary(loop, session_key: str, content: str) -> None:
+    """Append completed research output into the active session history."""
+    sessions = getattr(loop, "sessions", None)
+    if sessions is None or not content.strip():
+        return
+    session = sessions.get_or_create(session_key)
+    session.add_message("assistant", content)
+    sessions.save(session)
+
+
 async def cmd_research(ctx: CommandContext) -> OutboundMessage:
     """Start a bounded research loop for a topic."""
     loop = ctx.loop
@@ -214,6 +224,7 @@ async def cmd_research(ctx: CommandContext) -> OutboundMessage:
                 "findings_path": None,
                 "error": str(e),
             }
+        _persist_research_summary(loop, session_key, content)
         await loop.bus.publish_outbound(
             OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
         )

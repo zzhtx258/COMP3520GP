@@ -12,6 +12,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_research, cmd_research_log, cmd_research_status, cmd_research_stop
 from nanobot.command.router import CommandContext
+from nanobot.session.manager import SessionManager
 
 
 def _make_ctx(
@@ -27,6 +28,7 @@ def _make_ctx(
 @pytest.mark.asyncio
 async def test_research_command_starts_task_and_publishes_summary(tmp_path) -> None:
     bus = MessageBus()
+    sessions = SessionManager(tmp_path)
     research = SimpleNamespace(
         store=SimpleNamespace(topic_slug=lambda topic: topic.replace(" ", "-")),
         run=AsyncMock(
@@ -45,6 +47,7 @@ async def test_research_command_starts_task_and_publishes_summary(tmp_path) -> N
     loop = SimpleNamespace(
         research=research,
         bus=bus,
+        sessions=sessions,
         _active_tasks={},
         _research_tasks={},
         _research_status={},
@@ -55,6 +58,9 @@ async def test_research_command_starts_task_and_publishes_summary(tmp_path) -> N
     assert "Research started for `salary patterns`." in out.content
     final = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
     assert final.content == "Research completed for `salary patterns`."
+    session = sessions.get_or_create("cli:direct")
+    assert session.messages[-1]["role"] == "assistant"
+    assert session.messages[-1]["content"] == "Research completed for `salary patterns`."
 
 
 @pytest.mark.asyncio
