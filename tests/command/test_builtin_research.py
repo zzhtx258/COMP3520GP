@@ -10,7 +10,7 @@ import pytest
 from nanobot.agent.research import ResearchRunResult
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.command.builtin import cmd_research, cmd_research_log, cmd_research_status, cmd_research_stop
+from nanobot.command.builtin import cmd_new, cmd_research, cmd_research_log, cmd_research_status, cmd_research_stop
 from nanobot.command.router import CommandContext
 from nanobot.session.manager import SessionManager
 
@@ -136,3 +136,40 @@ async def test_research_stop_cancels_session_research_tasks() -> None:
 
     assert cancelled.is_set()
     assert "Stopped 1 research task" in out.content
+
+
+@pytest.mark.asyncio
+async def test_new_clears_research_status_and_cancels_research_tasks(tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("cli:direct")
+    session.add_message("user", "hello")
+    sessions.save(session)
+
+    cancelled = asyncio.Event()
+
+    async def slow() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(slow())
+    await asyncio.sleep(0)
+
+    loop = SimpleNamespace(
+        sessions=sessions,
+        consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+        _research_tasks={"cli:direct": [task]},
+        _active_tasks={"cli:direct": [task]},
+        _research_status={"cli:direct": {"topic": {"status": "done"}}},
+    )
+    loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
+
+    out = await cmd_new(_make_ctx("/new", loop=loop))
+
+    assert out.content == "New session started."
+    assert cancelled.is_set()
+    assert "cli:direct" not in loop._research_tasks
+    assert "cli:direct" not in loop._active_tasks
+    assert "cli:direct" not in loop._research_status

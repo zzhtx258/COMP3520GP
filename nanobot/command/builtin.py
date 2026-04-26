@@ -92,8 +92,14 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Start a fresh session."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    key = ctx.key or ctx.msg.session_key
+    session = ctx.session or loop.sessions.get_or_create(key)
     snapshot = session.messages[session.last_consolidated:]
+    await _cancel_tracked_tasks(getattr(loop, "_research_tasks", {}), key)
+    if active_tasks := getattr(loop, "_active_tasks", None):
+        active_tasks.pop(key, None)
+    if research_status := getattr(loop, "_research_status", None):
+        research_status.pop(key, None)
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
@@ -147,6 +153,17 @@ def _remove_tracked_task(mapping: dict[str, list[asyncio.Task]], key: str, task:
         tasks.remove(task)
     if not tasks:
         mapping.pop(key, None)
+
+
+async def _cancel_tracked_tasks(mapping: dict[str, list[asyncio.Task]], key: str) -> int:
+    tasks = mapping.pop(key, [])
+    cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+    for task in tasks:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    return cancelled
 
 
 def _persist_research_summary(loop, session_key: str, content: str) -> None:
