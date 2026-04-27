@@ -44,7 +44,9 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 - For ingested corpus or document searches, use `grep` with `path="data/content"`.
 - For graduate employment or other parsed corpus work, start discovery from `data/content` itself: identify relevant programme/year folders first, then narrow into subfolders such as `hybrid_auto` only after you know which directory you need.
 - Do not jump straight to broad patterns like `data/content/*/*/hybrid_auto/*.md` unless you have already scoped the target folders and specifically need parsed markdown files.
-- For broad, fuzzy, or context-heavy document questions, prefer `rag_query`.
+- For broad, fuzzy, alias-heavy, or context-heavy document questions, prefer `rag_query`.
+- For exact keyword, field-label, course-code, employer-name, or single-file lookups, prefer `grep` first.
+- For comparisons, rankings, aggregations, and trend analysis across many files or years, prefer `grep` / `read_file` to build an evidence table, and consider writing code early instead of defaulting to `rag_query`.
 - When calling `rag_query`, rewrite the user's ask into corpus-facing retrieval terms: prefer exact field labels, headings, entity aliases, programme names, years, and English corpus vocabulary; avoid workflow phrasing like "first", "then", "summarize", ranking instructions, or long natural-language task descriptions.
 - For graduate employment findings, avoid conclusions from a single year unless the user explicitly asks for one year only. By default, check multiple relevant years before claiming a pattern, comparison, or explanation.
 - If you only found evidence from one year so far, treat it as preliminary and continue searching other nearby or relevant years to reduce bias.

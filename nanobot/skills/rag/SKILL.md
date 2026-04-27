@@ -6,12 +6,12 @@ always: true
 
 # RAG Document Search
 
-**Always query these tools before searching online for anything about HKU programmes or graduate employment data.**
+**Always use these local tools before searching online for anything about HKU programmes or graduate employment data.**
 
 ## Tools
 
-- **rag_query** — semantic + knowledge-graph retrieval. Use this to identify candidate files, sections, entity aliases, and terminology when the question is open-ended, fuzzy, or requires cross-document scoping. It is a scoping tool, not an exact counter.
-- **grep** with `path="data/content"` — literal text search. Use this to confirm exact values: course codes, credit counts, salary figures, verbatim policy text. Set `output_mode='content'` to see matching lines; `fixed_strings=true` for verbatim quotes.
+- **rag_query** — semantic + knowledge-graph retrieval. Use this to identify candidate files, sections, entity aliases, and terminology when the question is open-ended, fuzzy, alias-heavy, or requires cross-document scoping. It is a scoping tool, not an exact counter.
+- **grep** with `path="data/content"` — literal text search. Use this first for exact values: course codes, credit counts, salary figures, verbatim policy text, exact employer names, and obvious field labels. Set `output_mode='content'` to see matching lines; `fixed_strings=true` for verbatim quotes.
 
 Use `path="data/content/<subdir>"` to narrow grep to a specific folder. For markdown-only searches, add `type="md"`.
 When browsing files, start from `data/content` and identify the relevant programme/year directories first. Only narrow into subfolders such as `hybrid_auto` after scoping the target directory; do not jump directly to `data/content/*/*/hybrid_auto/*.md` as the first discovery step.
@@ -46,6 +46,11 @@ Bad:
 
 Before retrieving anything, decide whether the question is **easy** or **hard**.
 
+Also decide whether it is **exact** or **fuzzy**:
+
+- **Exact**: the user already gave likely corpus terms, labels, names, years, or keywords. Start with `grep`.
+- **Fuzzy**: the user is asking about themes, aliases, related concepts, or likely locations in the corpus. Start with `rag_query`.
+
 **Easy**: the answer can be produced from a small number of directly retrieved passages.
 Examples: "What are the credit requirements for COMP3234?", "Which investment banks appeared in 2023?"
 
@@ -57,17 +62,18 @@ If cross-slice counting, comparison, or trend assembly is required, treat the qu
 ## Step 2 — Retrieval strategy
 
 **Easy question:**
-1. Use grep for exact-match lookups, or rag_query for open-ended entity discovery.
+1. Use grep for exact-match lookups, field labels, and obvious literal searches; use rag_query for open-ended entity discovery.
 2. Verify with targeted follow-up if needed.
 3. If the question is about graduate employment patterns or explanations, sanity-check whether more than one year should be inspected before answering.
 4. Answer directly.
 
 **Hard question:**
-1. Call rag_query once with a broad scoping query to identify: relevant years, degree names, file paths, section headings, entity aliases.
-2. rag_query output is for scoping only — do not read its numbers as exact counts or final answers.
-3. Use the scoping result to narrow subsequent grep / read_file calls to specific candidates.
-4. Do NOT open-endedly scan the whole corpus with grep or exec before scoping with rag_query first.
-5. For aggregations too large for manual reading, consider writing and running code over the narrowed candidate files instead of reasoning from retrieval alone.
+1. If the hard question is also fuzzy, call rag_query once with a broad scoping query to identify: relevant years, degree names, file paths, section headings, entity aliases.
+2. If the hard question is exact or table-driven, start with grep/read_file and move to code quickly; do not force a rag_query first.
+3. rag_query output is for scoping only — do not read its numbers as exact counts or final answers.
+4. Use the scoping result to narrow subsequent grep / read_file calls to specific candidates.
+5. Do not open-endedly scan the whole corpus with grep or exec when a single scoping rag_query would clearly narrow the search space first.
+6. For aggregations too large for manual reading, consider writing and running code over the narrowed candidate files instead of reasoning from retrieval alone.
 
 ## Step 3 — Optional subagents for independent slices
 

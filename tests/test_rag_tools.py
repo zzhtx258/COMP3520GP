@@ -207,6 +207,8 @@ def test_prompt_templates_prefer_grep_in_data_content() -> None:
 
     assert "data/content" in identity
     assert "prefer `rag_query`" in identity
+    assert "prefer `grep` first" in identity
+    assert "comparisons, rankings, aggregations" in identity
     assert "corpus-facing retrieval terms" in identity
     assert "start discovery from `data/content` itself" in identity
     assert "avoid conclusions from a single year" in identity
@@ -217,12 +219,15 @@ def test_prompt_templates_prefer_grep_in_data_content() -> None:
     assert "rag_grep" not in skill
     assert "data/content" in skill
     assert "identify the relevant programme/year directories first" in skill
+    assert "Exact" in skill
+    assert "Fuzzy" in skill
     assert "do not stop at a single year" in skill
     assert "literal text search" in skill
     assert "semantic + knowledge-graph retrieval" in skill
     assert "How to write `rag_query` queries" in skill
     assert "Treat the `rag_query` string as a retrieval query" in skill
     assert "Bad:" in skill
+    assert "do not force a rag_query first" in skill
     assert "consider writing and running code" in skill
     assert "consider using a subagent" in skill
 
