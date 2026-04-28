@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -308,3 +309,47 @@ async def test_research_collects_web_validation_brief_from_existing_findings(tmp
     assert "official HKU PLE / PCLL admissions references" in brief
     assert "Results for: official PCLL source" in brief
     assert fake_web.execute.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_scope_topic_prompt_is_anchored_to_local_hku_undergraduate_research(tmp_path) -> None:
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=SimpleNamespace(content="scoped"))
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=provider,
+        model="test-model",
+        tool_source=ToolRegistry(),
+        config=ResearchConfig(max_rounds=1, max_findings=3, max_stale_rounds=1),
+    )
+
+    await engine.scope_topic("CS专业的毕业数据有哪些有趣的现象")
+
+    messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    assert "HKU undergraduate programmes" in messages[0]["content"]
+    assert "IPEDS" in messages[0]["content"]
+    assert "HKU undergraduate programme research" in messages[0]["content"]
+
+
+def test_round_prompt_is_anchored_to_local_hku_undergraduate_research(tmp_path) -> None:
+    engine = ResearchEngine(
+        workspace=tmp_path,
+        provider=MagicMock(),
+        model="test-model",
+        tool_source=ToolRegistry(),
+        config=ResearchConfig(max_rounds=1, max_findings=3, max_stale_rounds=1),
+    )
+
+    messages = engine._build_round_messages(
+        topic="CS专业的毕业数据有哪些有趣的现象",
+        scoping_summary="- Check local graduate employment tables",
+        existing_findings=[],
+        round_index=1,
+        findings_remaining=3,
+        stale_rounds=0,
+        allow_web_validation=False,
+    )
+
+    assert "HKU undergraduate programmes" in messages[0]["content"]
+    assert "local workspace corpus" in messages[0]["content"]
+    assert "local HKU programme and graduate-outcomes data" in messages[0]["content"]

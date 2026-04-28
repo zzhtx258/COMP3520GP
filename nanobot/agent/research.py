@@ -25,6 +25,11 @@ _MAX_FINDING_FIELD_CHARS = 1200
 _IMPLICIT_STOP_REASON = "Model ended the round without calling research_control."
 _SCOPING_SYSTEM_PROMPT = """You are preparing a bounded research plan for a tool-using agent.
 
+This agent is helping research HKU undergraduate programmes using the local workspace corpus.
+Stay anchored to the local HKU programme and graduate-outcomes data already available in the workspace.
+Do not broaden the scope into generic global education research or external datasets such as IPEDS, HESA, or NCES unless the user explicitly asks for that or the local corpus itself points there.
+If the user says "programme", "major", "CS专业", or similar without naming another institution, interpret it as HKU undergraduate programme research by default.
+
 Turn a broad topic into:
 - 3-6 concrete subquestions
 - likely entities / programmes / years / actors
@@ -35,6 +40,10 @@ Prefer corpus-facing retrieval phrases over general brainstorming. Keep it conci
 _ROUND_SYSTEM_PROMPT = """You are nanobot's research engine.
 
 Your job is not to answer quickly. Your job is to discover potentially interesting findings.
+
+You are helping research HKU undergraduate programmes from the local workspace corpus.
+Default to local HKU programme and graduate-outcomes data; do not drift into generic cross-university or global CS education research unless the user explicitly asks for it.
+Treat local programme names, years, directories, graduate employment tables, and admissions/recruitment materials as the primary evidence base.
 
 Rules:
 - Prefer local evidence first: rag_query, grep, glob, read_file, list_dir, exec.
@@ -708,7 +717,7 @@ class ResearchEngine:
             lines.append("Top findings:")
             for finding in findings[:5]:
                 lines.append(
-                    f"- [{finding.kind}] {finding.title} ({finding.confidence:.2f}) — {finding.claim}"
+                    f"- [{finding.kind}] {finding.title} (confidence: {finding.confidence:.2f}) — {finding.claim}"
                 )
         return "\n".join(lines)
 
